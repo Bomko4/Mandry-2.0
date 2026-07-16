@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Mandry SUP</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>body{-webkit-tap-highlight-color:transparent}.noscroll::-webkit-scrollbar{display:none}.noscroll{-ms-overflow-style:none;scrollbar-width:none}</style>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans text-gray-900">
+<div id="app" class="max-w-md mx-auto min-h-screen bg-gray-100 flex flex-col relative">
+
+  <!-- ============ TAB: BOOK ============ -->
+  <div id="tab-book" class="tab-panel flex flex-col flex-1">
+    <div class="sticky top-0 bg-gray-100/95 backdrop-blur px-4 pt-3 pb-2 z-10">
+      <div class="flex items-center justify-between mb-2">
+        <button onclick="prevStep()" id="backBtn" class="text-blue-600 text-sm font-medium">‹ Назад</button>
+        <div class="text-center">
+          <div class="text-[15px] font-semibold">Mandry SUP</div>
+          <div class="text-[11px] text-gray-400">бронювання</div>
+        </div>
+        <div class="w-10"></div>
+      </div>
+      <div class="text-[11px] text-gray-400 mb-1" id="stepLabel">Крок 1 з 4</div>
+      <div class="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+        <div id="progressBar" class="h-full bg-blue-600 rounded-full transition-all" style="width:25%"></div>
+      </div>
+    </div>
+
+    <div class="flex-1 px-4 pb-24 overflow-y-auto">
+      <section id="step1" class="step">
+        <h2 class="text-xl font-bold mt-2 mb-3">Оберіть дату</h2>
+        <div id="dateScroll" class="flex gap-2 overflow-x-auto noscroll pb-2 mb-6"></div>
+        <h2 class="text-xl font-bold mb-3">Тривалість</h2>
+        <div class="flex flex-col gap-2" id="durationList">
+          <button data-val="1" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium">1 година</button>
+          <button data-val="2" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium">2 години</button>
+          <button data-val="morning" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium">Ранковий рафтинг</button>
+        </div>
+      </section>
+
+      <section id="step2" class="step hidden">
+        <h2 class="text-xl font-bold mt-2 mb-3">Сапи</h2>
+        <div class="flex gap-3 overflow-x-auto noscroll pb-2 mb-6" id="supScroll"></div>
+        <h2 class="text-xl font-bold mb-3">Каяки</h2>
+        <div class="flex gap-3 overflow-x-auto noscroll pb-2 mb-6" id="kayakScroll"></div>
+      </section>
+
+      <section id="step3" class="step hidden">
+        <h2 class="text-xl font-bold mt-2 mb-3">Оберіть час</h2>
+        <div id="timeGrid" class="grid grid-cols-2 gap-2"></div>
+      </section>
+
+      <section id="step4" class="step hidden">
+        <h2 class="text-xl font-bold mt-2 mb-4">Ваші дані</h2>
+        <div class="bg-white rounded-2xl p-4 shadow-sm mb-4">
+          <label class="text-xs text-gray-400">Ім'я та прізвище</label>
+          <input id="fullName" type="text" placeholder="Іван Петренко" class="w-full mt-1 text-base outline-none placeholder-gray-300">
+        </div>
+        <div id="summaryBox" class="bg-white rounded-2xl p-4 shadow-sm text-sm space-y-1 text-gray-600"></div>
+      </section>
+    </div>
+
+    <div class="absolute bottom-16 left-0 right-0 p-4">
+      <button id="mainBtn" onclick="nextStep()" disabled
+        class="w-full bg-blue-600 disabled:bg-gray-300 text-white font-semibold py-3.5 rounded-2xl transition">Далі</button>
+    </div>
+  </div>
+
+  <!-- ============ TAB: MY BOOKINGS ============ -->
+  <div id="tab-bookings" class="tab-panel hidden flex-1 overflow-y-auto px-4 pb-20">
+    <div class="pt-4 pb-3">
+      <div class="text-xl font-bold">Мої бронювання</div>
+    </div>
+    <div id="bookingsList" class="flex flex-col gap-3"></div>
+  </div>
+
+  <!-- ============ TAB: ABOUT ============ -->
+  <div id="tab-about" class="tab-panel hidden flex-1 overflow-y-auto px-4 pb-20">
+    <div class="pt-4 pb-3">
+      <div class="text-xl font-bold">Інформація</div>
+    </div>
+
+    <a href="https://mandry-sup-menu.example.com" target="_blank"
+       class="block w-full bg-blue-600 text-white text-center font-semibold py-3.5 rounded-2xl mb-4">🍽️ Меню</a>
+
+    <div class="flex flex-col gap-2" id="accordions"></div>
+  </div>
+
+  <!-- ============ BOTTOM NAV ============ -->
+  <div class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-gray-200 flex">
+    <button class="nav-btn flex-1 py-2.5 flex flex-col items-center gap-0.5" data-tab="book">
+      <span class="text-xl">🛶</span><span class="text-[11px] font-medium">Забронювати</span>
+    </button>
+    <button class="nav-btn flex-1 py-2.5 flex flex-col items-center gap-0.5" data-tab="bookings">
+      <span class="text-xl">📋</span><span class="text-[11px] font-medium">Мої бронювання</span>
+    </button>
+    <button class="nav-btn flex-1 py-2.5 flex flex-col items-center gap-0.5" data-tab="about">
+      <span class="text-xl">ℹ️</span><span class="text-[11px] font-medium">Інформація</span>
+    </button>
+  </div>
+
+</div>
+
+<script>
+const tg = window.Telegram?.WebApp;
+tg?.ready(); tg?.expand();
+
+const TIME_SLOTS = ["10:15-11:15","11:30-12:30","12:45-13:45","14:00-15:00","15:15-16:15","16:30-17:30","17:45-18:45","19:00-20:00","20:10-21:10"];
+const MORNING_WINDOW = "05:45-08:00";
+const MONTHS = ["січ","лют","бер","кві","тра","чер","лип","сер","вер","жов","лис","гру"];
+const DAYS = ["Нд","Пн","Вт","Ср","Чт","Пт","Сб"];
+
+/* ================= TAB SWITCHING ================= */
+document.querySelectorAll('.nav-btn').forEach(btn=>{
+  btn.onclick = () => switchTab(btn.dataset.tab);
+});
+function switchTab(name){
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.add('hidden'));
+  document.getElementById('tab-'+name).classList.remove('hidden');
+  document.querySelectorAll('.nav-btn').forEach(b=>{
+    const active = b.dataset.tab === name;
+    b.classList.toggle('text-blue-600', active);
+    b.classList.toggle('text-gray-400', !active);
+  });
+}
+switchTab('book');
+
+/* ================= BOOKING WIZARD ================= */
+let state = { date:null, duration:null, equipment:null, quantity:1, time:null, fullName:'' };
+let step = 1;
+
+const dateScroll = document.getElementById('dateScroll');
+for (let i=0;i<14;i++){
+  const d = new Date(); d.setDate(d.getDate()+i);
+  const btn = document.createElement('button');
+  btn.className = 'date-btn flex-shrink-0 w-16 py-2.5 rounded-2xl bg-white border-2 border-transparent shadow-sm text-center';
+  const dd = String(d.getDate()).padStart(2,'0');
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  btn.dataset.val = `${dd}.${mm}`;
+  btn.innerHTML = `<div class="text-[11px] text-gray-400">${DAYS[d.getDay()]}</div><div class="text-lg font-bold leading-tight">${d.getDate()}</div><div class="text-[11px] text-gray-400">${MONTHS[d.getMonth()]}</div>`;
+  btn.onclick = () => { selectOne('.date-btn', btn); state.date = btn.dataset.val; checkStep1(); };
+  dateScroll.appendChild(btn);
+}
+document.querySelectorAll('.dur-btn').forEach(btn=>{
+  btn.onclick = () => { selectOne('.dur-btn', btn); state.duration = btn.dataset.val; checkStep1(); };
+});
+function checkStep1(){ setMainEnabled(!!state.date && !!state.duration); }
+
+const SUPS = [
+  {id:'sup_single', title:'Сап одномісний', price:'300₴/год', img:'🚣'},
+  {id:'sup_double', title:'Сап двомісний', price:'450₴/год', img:'🚣‍♂️'}
+];
+const KAYAKS = [
+  {id:'kayak_single', title:'Каяк одномісний', price:'350₴/год', img:'🛶'},
+  {id:'kayak_double', title:'Каяк двомісний', price:'500₴/год', img:'🛶'}
+];
+const supScroll = document.getElementById('supScroll');
+SUPS.forEach(item=>{
+  const card = document.createElement('div');
+  card.className = 'eq-card flex-shrink-0 w-40 bg-white rounded-2xl shadow-sm overflow-hidden border-2 border-transparent';
+  card.innerHTML = `
+    <div class="h-24 bg-gray-100 flex items-center justify-center text-4xl">${item.img}</div>
+    <div class="p-3">
+      <div class="font-semibold text-sm mb-1">${item.title}</div>
+      <div class="text-xs text-gray-400 mb-2">${item.price}</div>
+      <div class="flex items-center justify-between bg-gray-50 rounded-xl px-1 py-1">
+        <button class="qty-minus w-7 h-7 rounded-lg bg-white shadow-sm font-bold text-blue-600">−</button>
+        <span class="qty-val text-sm font-semibold">1</span>
+        <button class="qty-plus w-7 h-7 rounded-lg bg-white shadow-sm font-bold text-blue-600">+</button>
+      </div>
+    </div>`;
+  const qtyVal = card.querySelector('.qty-val');
+  let qty = 1;
+  const selectSup = () => { selectOne('.eq-card', card); state.equipment = item.id; state.quantity = qty; checkStep2(); };
+  card.querySelector('.qty-minus').onclick = e => { e.stopPropagation(); qty = Math.max(1, qty-1); qtyVal.textContent = qty; selectSup(); };
+  card.querySelector('.qty-plus').onclick = e => { e.stopPropagation(); qty = Math.min(10, qty+1); qtyVal.textContent = qty; selectSup(); };
+  card.onclick = selectSup;
+  supScroll.appendChild(card);
+});
+const kayakScroll = document.getElementById('kayakScroll');
+KAYAKS.forEach(item=>{
+  const card = document.createElement('div');
+  card.className = 'eq-card flex-shrink-0 w-40 bg-white rounded-2xl shadow-sm overflow-hidden border-2 border-transparent';
+  card.innerHTML = `
+    <div class="h-24 bg-gray-100 flex items-center justify-center text-4xl">${item.img}</div>
+    <div class="p-3">
+      <div class="font-semibold text-sm mb-1">${item.title}</div>
+      <div class="text-xs text-gray-400 mb-3">${item.price}</div>
+      <button class="select-btn w-full bg-blue-600 text-white text-sm font-medium py-2 rounded-xl">Обрати</button>
+    </div>`;
+  card.querySelector('.select-btn').onclick = e => { e.stopPropagation(); selectOne('.eq-card', card); state.equipment = item.id; state.quantity = 1; checkStep2(); };
+  kayakScroll.appendChild(card);
+});
+function checkStep2(){ setMainEnabled(!!state.equipment); }
+
+const timeGrid = document.getElementById('timeGrid');
+function renderTimeSlots(){
+  timeGrid.innerHTML = '';
+  if (state.duration === 'morning'){
+    const btn = document.createElement('button');
+    btn.className = 'time-btn col-span-2 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium';
+    btn.textContent = MORNING_WINDOW;
+    btn.onclick = () => { selectOne('.time-btn', btn); state.time = MORNING_WINDOW; setMainEnabled(true); };
+    timeGrid.appendChild(btn);
+    return;
+  }
+  const dur = parseInt(state.duration || '1', 10);
+  const maxStart = TIME_SLOTS.length - dur;
+  for (let i=0; i<=maxStart; i++){
+    const label = TIME_SLOTS[i].split('-')[0] + '–' + TIME_SLOTS[i+dur-1].split('-')[1];
+    const btn = document.createElement('button');
+    btn.className = 'time-btn py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium text-sm';
+    btn.textContent = label;
+    btn.onclick = () => { selectOne('.time-btn', btn); state.time = TIME_SLOTS[i]; setMainEnabled(true); };
+    timeGrid.appendChild(btn);
+  }
+}
+
+const fullNameInput = document.getElementById('fullName');
+fullNameInput.addEventListener('input', () => { state.fullName = fullNameInput.value.trim(); setMainEnabled(state.fullName.length > 2); });
+function renderSummary(){
+  const eqLabel = {sup_single:'Сап одномісний',sup_double:'Сап двомісний',kayak_single:'Каяк одномісний',kayak_double:'Каяк двомісний'}[state.equipment] || '';
+  const durLabel = state.duration === 'morning' ? 'Ранковий рафтинг' : (state.duration + ' год');
+  document.getElementById('summaryBox').innerHTML = `
+    <div class="flex justify-between"><span>Дата</span><span class="font-medium text-gray-900">${state.date}</span></div>
+    <div class="flex justify-between"><span>Тривалість</span><span class="font-medium text-gray-900">${durLabel}</span></div>
+    <div class="flex justify-between"><span>Спорядження</span><span class="font-medium text-gray-900">${eqLabel} × ${state.quantity}</span></div>
+    <div class="flex justify-between"><span>Час</span><span class="font-medium text-gray-900">${state.time}</span></div>`;
+}
+
+function selectOne(selector, active){
+  document.querySelectorAll(selector).forEach(el => el.classList.remove('border-blue-600'));
+  active.classList.add('border-blue-600');
+}
+function setMainEnabled(ok){ document.getElementById('mainBtn').disabled = !ok; }
+function showStep(n){
+  document.querySelectorAll('.step').forEach(s => s.classList.add('hidden'));
+  document.getElementById('step'+n).classList.remove('hidden');
+  document.getElementById('stepLabel').textContent = `Крок ${n} з 4`;
+  document.getElementById('progressBar').style.width = (n*25)+'%';
+  document.getElementById('backBtn').style.visibility = n === 1 ? 'hidden' : 'visible';
+  const mainBtn = document.getElementById('mainBtn');
+  if (n === 1) setMainEnabled(!!state.date && !!state.duration);
+  if (n === 2) setMainEnabled(!!state.equipment);
+  if (n === 3) { renderTimeSlots(); setMainEnabled(!!state.time); }
+  if (n === 4) { renderSummary(); setMainEnabled(state.fullName.length > 2); mainBtn.textContent = 'Поділитись номером і забронювати'; }
+  else mainBtn.textContent = 'Далі';
+}
+function nextStep(){ if (step === 4){ submitBooking(); return; } step++; showStep(step); }
+function prevStep(){ if (step === 1) return; step--; showStep(step); }
+
+function submitBooking(){
+  const payload = { type:'booking', date: state.date, duration: state.duration, equipment: state.equipment, quantity: state.quantity, time: state.time, full_name: state.fullName };
+  const send = (phone) => { if (phone) payload.phone = phone; tg?.sendData(JSON.stringify(payload)); tg?.close(); };
+  if (tg?.requestContact){
+    tg.requestContact((shared, contact) => { send(shared ? contact?.responseUnsafe?.contact?.phone_number : null); });
+  } else { send(null); }
+}
+showStep(1);
+
+/* ================= MY BOOKINGS (mock) ================= */
+const mockBookings = [
+  { code:'04231', date:'12.07.2026', time:'14:00-15:00', equipment:'Сап одномісний × 2' },
+  { code:'09817', date:'15.07.2026', time:'05:45-08:00', equipment:'Ранковий рафтинг · Каяк двомісний' }
+];
+const bookingsList = document.getElementById('bookingsList');
+if (mockBookings.length === 0){
+  bookingsList.innerHTML = `<div class="text-center text-gray-400 text-sm mt-10">У вас поки немає активних бронювань</div>`;
+} else {
+  mockBookings.forEach(b => {
+    const card = document.createElement('div');
+    card.className = 'bg-white rounded-2xl p-4 shadow-sm';
+    card.innerHTML = `
+      <div class="flex justify-between items-start mb-2">
+        <div class="text-sm text-gray-400">Код бронювання</div>
+        <div class="text-sm font-bold tracking-wide">#${b.code}</div>
+      </div>
+      <div class="flex justify-between text-sm mb-1"><span class="text-gray-400">Дата</span><span class="font-medium">${b.date}</span></div>
+      <div class="flex justify-between text-sm mb-1"><span class="text-gray-400">Час</span><span class="font-medium">${b.time}</span></div>
+      <div class="flex justify-between text-sm mb-3"><span class="text-gray-400">Спорядження</span><span class="font-medium text-right">${b.equipment}</span></div>
+      <button class="cancel-btn w-full bg-red-50 text-red-600 font-semibold py-2.5 rounded-xl">Скасувати бронювання</button>`;
+    card.querySelector('.cancel-btn').onclick = () => cancelBooking(b.code, card);
+    bookingsList.appendChild(card);
+  });
+}
+function cancelBooking(code, cardEl){
+  tg?.sendData(JSON.stringify({ type:'cancel', cancel_code: code }));
+  cardEl.style.opacity = '0.4';
+  cardEl.querySelector('.cancel-btn').textContent = 'Скасовується…';
+  cardEl.querySelector('.cancel-btn').disabled = true;
+}
+
+/* ================= ABOUT US ================= */
+const ACCORDIONS = [
+  { icon:'📋', title:'Правила користування', body:
+    "1. Дотримуйтесь безпеки на воді<br>2. Використовуйте рятувальний жилет<br>3. Не перевищуйте дозволену вагу<br>4. Приходьте за 15 хвилин до старту<br>5. Слідуйте інструкціям персоналу<br>6. Повідомте про травми чи поломки" },
+  { icon:'🚨', title:'Краш ліст — Ціна відшкодування', body:
+    "<b>Надувні SUP дошки:</b><br>• AQUA MARINA MONSTER BT-21 — 15 500 грн<br>• AQUA MARINA MONSTER BT-23 — 15 500 грн<br>• AQUA MARINA PURE AIR — 9 100 грн<br><br>" +
+    "<b>Надувні каяки:</b><br>• Aqua Marina BETTA BE-312 — 12 300 грн<br>• Aqua Marina LAXO LA-380 — 17 700 грн<br><br>" +
+    "<b>Аксесуари:</b><br>• Весло під сапборд — 2 200 грн<br>• Весло під каяк — 2 800 грн<br>• Плавник під сап-дошку — 600 грн<br>• Плавник до каяка — 700 грн<br>• Сидіння до каяка — 1 200 грн<br>• Гермомішок — 400 грн<br>• Страхувальний лиш для SUP — 650 грн<br><br>" +
+    "<i>У разі пошкодження обладнання до вас буде застосована відповідна компенсація.</i>" },
+  { icon:'📞', title:'Контакти', body:
+    "Телефон: <a class='text-blue-600' href='tel:+380989055753'>+380 98 905 57 53</a><br>Пошта: <a class='text-blue-600' href='mailto:mandry70625@gmail.com'>mandry70625@gmail.com</a><br>Instagram: <a class='text-blue-600' href='https://www.instagram.com/mandry.sup/' target='_blank'>@mandry.sup</a>" }
+];
+const accordionsEl = document.getElementById('accordions');
+ACCORDIONS.forEach((item, idx) => {
+  const wrap = document.createElement('div');
+  wrap.className = 'bg-white rounded-2xl shadow-sm overflow-hidden';
+  wrap.innerHTML = `
+    <button class="acc-toggle w-full flex items-center justify-between px-4 py-3.5 text-left">
+      <span class="font-semibold text-sm">${item.icon} ${item.title}</span>
+      <span class="acc-chevron text-gray-300 transition-transform">▾</span>
+    </button>
+    <div class="acc-body hidden px-4 pb-4 text-sm text-gray-500 leading-relaxed">${item.body}</div>`;
+  const toggle = wrap.querySelector('.acc-toggle');
+  const body = wrap.querySelector('.acc-body');
+  const chevron = wrap.querySelector('.acc-chevron');
+  toggle.onclick = () => { body.classList.toggle('hidden'); chevron.classList.toggle('rotate-180'); };
+  accordionsEl.appendChild(wrap);
+});
+</script>
+</body>
+</html>

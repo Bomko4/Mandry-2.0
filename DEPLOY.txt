@@ -1,0 +1,89 @@
+FILES IN THIS BUNDLE
+--------------------
+mandry.py                    - the bot (mini-app + fallback text flow, same logic as your original)
+index.html                   - the mini app (booking, my bookings, about)
+requirements.txt
+.env.example                 - copy to .env and fill in
+mandry-bot.service           - systemd unit
+nginx_mandry_webapp.conf     - nginx site config to serve index.html over HTTPS
+
+SECURITY FIRST
+--------------
+The credentials.json and .env you uploaded were pasted into this chat, so treat them as
+compromised: rotate the Google service account key (IAM > Service Accounts > Keys > new
+key, then delete the old one) and create a brand new bot / token in BotFather rather than
+reusing the old BOT_TOKEN. Never commit credentials.json or .env to git (.gitignore already
+covers this).
+
+1) NEW BOT IN TELEGRAM
+-----------------------
+@BotFather -> /newbot -> follow prompts -> copy the token into .env as BOT_TOKEN.
+/mybots -> your bot -> Bot Settings -> Menu Button -> Configure menu button -> paste your
+WEBAPP_URL (set that up in step 5 first, then come back and set this).
+
+2) SERVER (Hetzner) - Ubuntu 24.04
+------------------------------------
+ssh root@YOUR_SERVER_IP
+apt update && apt upgrade -y
+adduser botuser
+usermod -aG sudo botuser
+ufw allow OpenSSH
+ufw allow 80
+ufw allow 443
+ufw enable
+su - botuser
+
+3) INSTALL DEPENDENCIES
+------------------------
+sudo apt install -y python3 python3-venv python3-pip git nginx certbot python3-certbot-nginx
+mkdir -p /home/botuser/mandry/webapp
+cd /home/botuser/mandry
+
+4) UPLOAD FILES (run from your local machine)
+-----------------------------------------------
+scp mandry.py requirements.txt mandry-bot.service .env.example botuser@YOUR_SERVER_IP:/home/botuser/mandry/
+scp index.html botuser@YOUR_SERVER_IP:/home/botuser/mandry/webapp/
+scp credentials.json botuser@YOUR_SERVER_IP:/home/botuser/mandry/   # your own rotated key
+
+Then on the server:
+cd /home/botuser/mandry
+cp .env.example .env
+nano .env      # fill BOT_TOKEN, STAFF_CHAT_ID, WEBAPP_URL=https://your-domain/index.html, etc.
+
+5) SET UP THE MINI APP DOMAIN (needs HTTPS, so needs a real domain)
+----------------------------------------------------------------------
+Point an A record for your-domain.example.com to YOUR_SERVER_IP, then:
+sudo cp nginx_mandry_webapp.conf /etc/nginx/sites-available/mandry_webapp
+sudo sed -i 's/your-domain.example.com/YOUR_ACTUAL_DOMAIN/' /etc/nginx/sites-available/mandry_webapp
+sudo ln -s /etc/nginx/sites-available/mandry_webapp /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d YOUR_ACTUAL_DOMAIN
+Now https://YOUR_ACTUAL_DOMAIN/index.html is live. Put that exact URL as WEBAPP_URL in .env
+and as the BotFather Menu Button URL (step 1).
+
+6) PYTHON ENV + STAFF_CHAT_ID
+-------------------------------
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+
+To get STAFF_CHAT_ID: create a Telegram group, add your new bot to it, send any message,
+then (bot NOT running) open:
+https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates
+Find "chat":{"id": -100......} for that group and put it in .env as STAFF_CHAT_ID.
+
+7) RUN AS A SERVICE
+---------------------
+sudo cp mandry-bot.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable mandry-bot
+sudo systemctl start mandry-bot
+sudo systemctl status mandry-bot
+sudo journalctl -u mandry-bot -f
+
+8) UPDATING LATER
+--------------------
+scp changed files -> server
+sudo systemctl restart mandry-bot
+(if index.html changed, no restart needed - nginx serves it directly)

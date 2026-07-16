@@ -1,0 +1,15 @@
+[Unit]
+Description=Mandry Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/mandry
+EnvironmentFile=/home/botuser/mandry/.env
+ExecStart=/home/botuser/mandry/.venv/bin/python3 /home/botuser/mandry/mandry.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
