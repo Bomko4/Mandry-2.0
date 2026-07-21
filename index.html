@@ -16,8 +16,8 @@
       <div class="flex items-center justify-between mb-2">
         <button onclick="prevStep()" id="backBtn" class="text-blue-600 text-sm font-medium">‹ Назад</button>
         <div class="text-center">
-          <div class="text-[15px] font-semibold">Mandry SUP</div>
-          <div class="text-[11px] text-gray-400">бронювання</div>
+          <div class="text-[15px] font-semibold">MandryBooking2.0</div>
+          <div class="text-[11px] text-gray-400">mini app</div>
         </div>
         <div class="w-10"></div>
       </div>
@@ -35,15 +35,15 @@
         <div class="flex flex-col gap-2" id="durationList">
           <button data-val="1" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium">1 година</button>
           <button data-val="2" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium">2 години</button>
-          <button data-val="morning" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium">Ранковий рафтинг</button>
+          <button data-val="morning" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium">Сплав на світанку</button>
         </div>
       </section>
 
       <section id="step2" class="step hidden">
         <h2 class="text-xl font-bold mt-2 mb-3">Сапи</h2>
-        <div class="flex gap-3 overflow-x-auto noscroll pb-2 mb-6" id="supScroll"></div>
+        <div class="flex justify-center gap-3 overflow-x-auto noscroll pb-2 mb-6" id="supScroll"></div>
         <h2 class="text-xl font-bold mb-3">Каяки</h2>
-        <div class="flex gap-3 overflow-x-auto noscroll pb-2 mb-6" id="kayakScroll"></div>
+        <div class="flex justify-center gap-3 overflow-x-auto noscroll pb-2 mb-6" id="kayakScroll"></div>
       </section>
 
       <section id="step3" class="step hidden">
@@ -68,23 +68,35 @@
   </div>
 
   <!-- ============ TAB: MY BOOKINGS ============ -->
-  <div id="tab-bookings" class="tab-panel hidden flex-1 overflow-y-auto px-4 pb-20">
-    <div class="pt-4 pb-3">
-      <div class="text-xl font-bold">Мої бронювання</div>
+  <div id="tab-bookings" class="tab-panel hidden flex-1 overflow-y-auto">
+    <div class="sticky top-0 bg-gray-100/95 backdrop-blur px-4 pt-3 pb-2 z-10 text-center">
+      <div class="text-[15px] font-semibold">MandryBooking2.0</div>
+      <div class="text-[11px] text-gray-400">mini app</div>
     </div>
-    <div id="bookingsList" class="flex flex-col gap-3"></div>
+    <div class="px-4 pb-20">
+      <div class="pt-4 pb-3">
+        <div class="text-xl font-bold">Мої бронювання</div>
+      </div>
+      <div id="bookingsList" class="flex flex-col gap-3"></div>
+    </div>
   </div>
 
   <!-- ============ TAB: ABOUT ============ -->
-  <div id="tab-about" class="tab-panel hidden flex-1 overflow-y-auto px-4 pb-20">
-    <div class="pt-4 pb-3">
-      <div class="text-xl font-bold">Інформація</div>
+  <div id="tab-about" class="tab-panel hidden flex-1 overflow-y-auto">
+    <div class="sticky top-0 bg-gray-100/95 backdrop-blur px-4 pt-3 pb-2 z-10 text-center">
+      <div class="text-[15px] font-semibold">MandryBooking2.0</div>
+      <div class="text-[11px] text-gray-400">mini app</div>
     </div>
+    <div class="px-4 pb-20">
+      <div class="pt-4 pb-3">
+        <div class="text-xl font-bold">Інформація</div>
+      </div>
 
-    <a href="https://mandry-sup-menu.example.com" target="_blank"
-       class="block w-full bg-blue-600 text-white text-center font-semibold py-3.5 rounded-2xl mb-4">🍽️ Меню</a>
+      <a href="https://mandry-sup-menu.example.com" target="_blank"
+         class="block w-full bg-blue-600 text-white text-center font-semibold py-3.5 rounded-2xl mb-4">🍽️ Меню</a>
 
-    <div class="flex flex-col gap-2" id="accordions"></div>
+      <div class="flex flex-col gap-2" id="accordions"></div>
+    </div>
   </div>
 
   <!-- ============ BOTTOM NAV ============ -->
@@ -105,6 +117,10 @@
 <script>
 const tg = window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
+
+// Set this to your bot server's HTTPS API URL, e.g. "https://mandrysup.duckdns.org/api"
+// (must be HTTPS — a Mini App served over HTTPS cannot call an http:// endpoint).
+const API_BASE_URL = "";
 
 const TIME_SLOTS = ["10:15-11:15","11:30-12:30","12:45-13:45","14:00-15:00","15:15-16:15","16:30-17:30","17:45-18:45","19:00-20:00","20:10-21:10"];
 const MORNING_WINDOW = "05:45-08:00";
@@ -131,29 +147,34 @@ let state = { date:null, duration:null, equipment:null, quantity:1, time:null, f
 let step = 1;
 
 const dateScroll = document.getElementById('dateScroll');
-for (let i=0;i<14;i++){
+for (let i=0;i<28;i++){
   const d = new Date(); d.setDate(d.getDate()+i);
+  const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+  const isToday = i === 0;
   const btn = document.createElement('button');
-  btn.className = 'date-btn flex-shrink-0 w-16 py-2.5 rounded-2xl bg-white border-2 border-transparent shadow-sm text-center';
+  btn.className = 'date-btn flex-shrink-0 w-16 py-2.5 rounded-2xl bg-white border-2 shadow-sm text-center '
+    + (isToday ? 'border-blue-600' : 'border-transparent');
   const dd = String(d.getDate()).padStart(2,'0');
   const mm = String(d.getMonth()+1).padStart(2,'0');
   btn.dataset.val = `${dd}.${mm}`;
-  btn.innerHTML = `<div class="text-[11px] text-gray-400">${DAYS[d.getDay()]}</div><div class="text-lg font-bold leading-tight">${d.getDate()}</div><div class="text-[11px] text-gray-400">${MONTHS[d.getMonth()]}</div>`;
-  btn.onclick = () => { selectOne('.date-btn', btn); state.date = btn.dataset.val; checkStep1(); };
+  const dayColor = isWeekend ? 'text-blue-600 font-bold' : 'text-gray-400';
+  const numColor = isWeekend ? 'text-blue-600' : '';
+  btn.innerHTML = `<div class="text-[11px] ${dayColor}">${DAYS[d.getDay()]}</div><div class="text-lg font-bold leading-tight ${numColor}">${d.getDate()}</div><div class="text-[11px] text-gray-400">${MONTHS[d.getMonth()]}</div>${isToday ? '<div class="text-[9px] text-blue-600 font-semibold mt-0.5">сьогодні</div>' : ''}`;
+  btn.onclick = () => { selectOne('.date-btn', btn); state.date = btn.dataset.val; state.time = null; checkStep1(); };
   dateScroll.appendChild(btn);
 }
 document.querySelectorAll('.dur-btn').forEach(btn=>{
-  btn.onclick = () => { selectOne('.dur-btn', btn); state.duration = btn.dataset.val; checkStep1(); };
+  btn.onclick = () => { selectOne('.dur-btn', btn); state.duration = btn.dataset.val; state.time = null; checkStep1(); };
 });
 function checkStep1(){ setMainEnabled(!!state.date && !!state.duration); }
 
 const SUPS = [
-  {id:'sup_single', title:'Сап одномісний', price:'300₴/год', img:'🚣'},
-  {id:'sup_double', title:'Сап двомісний', price:'450₴/год', img:'🚣‍♂️'}
+  {id:'sup_single', title:'Сап одномісний', price1h:'400грн/год', price2h:'700грн/2 год', img:'🚣'},
+  {id:'sup_double', title:'Сап двомісний', price1h:'600грн/год', price2h:'1100грн/2 год', img:'🚣‍♂️'}
 ];
 const KAYAKS = [
-  {id:'kayak_single', title:'Каяк одномісний', price:'350₴/год', img:'🛶'},
-  {id:'kayak_double', title:'Каяк двомісний', price:'500₴/год', img:'🛶'}
+  {id:'kayak_single', title:'Каяк одномісний', price1h:'450грн/год', price2h:'800грн/2 год', img:'🛶'},
+  {id:'kayak_double', title:'Каяк двомісний', price1h:'700грн/год', price2h:'1300грн/2 год', img:'🛶'}
 ];
 const supScroll = document.getElementById('supScroll');
 SUPS.forEach(item=>{
@@ -163,7 +184,7 @@ SUPS.forEach(item=>{
     <div class="h-24 bg-gray-100 flex items-center justify-center text-4xl">${item.img}</div>
     <div class="p-3">
       <div class="font-semibold text-sm mb-1">${item.title}</div>
-      <div class="text-xs text-gray-400 mb-2">${item.price}</div>
+      <div class="text-xs text-gray-400 mb-2 price-line" data-price1h="${item.price1h}" data-price2h="${item.price2h}">${item.price1h}</div>
       <div class="flex items-center justify-between bg-gray-50 rounded-xl px-1 py-1">
         <button class="qty-minus w-7 h-7 rounded-lg bg-white shadow-sm font-bold text-blue-600">−</button>
         <span class="qty-val text-sm font-semibold">1</span>
@@ -172,7 +193,7 @@ SUPS.forEach(item=>{
     </div>`;
   const qtyVal = card.querySelector('.qty-val');
   let qty = 1;
-  const selectSup = () => { selectOne('.eq-card', card); state.equipment = item.id; state.quantity = qty; checkStep2(); };
+  const selectSup = () => { selectOne('.eq-card', card); state.equipment = item.id; state.quantity = qty; state.time = null; checkStep2(); };
   card.querySelector('.qty-minus').onclick = e => { e.stopPropagation(); qty = Math.max(1, qty-1); qtyVal.textContent = qty; selectSup(); };
   card.querySelector('.qty-plus').onclick = e => { e.stopPropagation(); qty = Math.min(10, qty+1); qtyVal.textContent = qty; selectSup(); };
   card.onclick = selectSup;
@@ -181,47 +202,123 @@ SUPS.forEach(item=>{
 const kayakScroll = document.getElementById('kayakScroll');
 KAYAKS.forEach(item=>{
   const card = document.createElement('div');
-  card.className = 'eq-card flex-shrink-0 w-40 bg-white rounded-2xl shadow-sm overflow-hidden border-2 border-transparent';
+  card.className = 'eq-card flex-shrink-0 w-40 bg-white rounded-2xl shadow-sm overflow-hidden border-2 border-transparent cursor-pointer';
   card.innerHTML = `
     <div class="h-24 bg-gray-100 flex items-center justify-center text-4xl">${item.img}</div>
     <div class="p-3">
       <div class="font-semibold text-sm mb-1">${item.title}</div>
-      <div class="text-xs text-gray-400 mb-3">${item.price}</div>
-      <button class="select-btn w-full bg-blue-600 text-white text-sm font-medium py-2 rounded-xl">Обрати</button>
+      <div class="text-xs text-gray-400 mb-1 price-line" data-price1h="${item.price1h}" data-price2h="${item.price2h}">${item.price1h}</div>
     </div>`;
-  card.querySelector('.select-btn').onclick = e => { e.stopPropagation(); selectOne('.eq-card', card); state.equipment = item.id; state.quantity = 1; checkStep2(); };
+  card.onclick = () => { selectOne('.eq-card', card); state.equipment = item.id; state.quantity = 1; state.time = null; checkStep2(); };
   kayakScroll.appendChild(card);
 });
 function checkStep2(){ setMainEnabled(!!state.equipment); }
+function updateEquipmentPrices(){
+  const use2h = state.duration === '2';
+  document.querySelectorAll('.price-line').forEach(el => {
+    el.textContent = use2h ? el.dataset.price2h : el.dataset.price1h;
+  });
+}
 
 const timeGrid = document.getElementById('timeGrid');
-function renderTimeSlots(){
+
+function addMinutesToTime(hhmm, minutesToAdd){
+  const [h, m] = hhmm.split(':').map(Number);
+  const total = h * 60 + m + minutesToAdd;
+  const nh = Math.floor((total % (24*60)) / 60);
+  const nm = total % 60;
+  return String(nh).padStart(2,'0') + ':' + String(nm).padStart(2,'0');
+}
+
+async function fetchAvailability(date, equipment, duration){
+  if (!API_BASE_URL){
+    console.warn('API_BASE_URL is not set — availability cannot be checked, all slots will show as unavailable.');
+    return duration === 'morning' ? { closed: true, available: false, maxQty: 0 } : { closed: true, slots: [] };
+  }
+  try {
+    const res = await fetch(`${API_BASE_URL}/availability?date=${encodeURIComponent(date)}&equipment=${encodeURIComponent(equipment)}&duration=${encodeURIComponent(duration)}`);
+    if (!res.ok) throw new Error('bad response');
+    return await res.json();
+  } catch (e) {
+    console.error('fetchAvailability failed:', e);
+    return duration === 'morning' ? { closed: true, available: false, maxQty: 0 } : { closed: true, slots: [] };
+  }
+}
+
+async function renderTimeSlots(){
+  timeGrid.innerHTML = '<div class="col-span-2 text-center text-sm text-gray-400 py-4">Завантаження…</div>';
+  const availability = await fetchAvailability(state.date, state.equipment, state.duration);
   timeGrid.innerHTML = '';
+
   if (state.duration === 'morning'){
+    const closed = availability.closed || !availability.available || (availability.maxQty || 0) < state.quantity;
     const btn = document.createElement('button');
-    btn.className = 'time-btn col-span-2 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium';
+    btn.className = 'time-btn col-span-2 py-3 rounded-2xl border-2 border-transparent shadow-sm font-medium '
+      + (closed ? 'bg-gray-100 text-gray-300 cursor-not-allowed' : 'bg-white');
     btn.textContent = MORNING_WINDOW;
-    btn.onclick = () => { selectOne('.time-btn', btn); state.time = MORNING_WINDOW; setMainEnabled(true); };
+    btn.disabled = closed;
+    if (!closed){
+      btn.onclick = () => { selectOne('.time-btn', btn); state.time = MORNING_WINDOW; setMainEnabled(true); };
+    }
     timeGrid.appendChild(btn);
+    if (!closed) return;
+    if (availability.maxQty > 0 && availability.maxQty < state.quantity){
+      const note = document.createElement('div');
+      note.className = 'col-span-2 text-center text-xs text-red-500 mt-2';
+      note.textContent = `Доступно лише ${availability.maxQty} од. на цей час — зменшіть кількість на попередньому кроці.`;
+      timeGrid.appendChild(note);
+    }
     return;
   }
+
+  if (availability.closed){
+    timeGrid.innerHTML = '<div class="col-span-2 text-center text-sm text-gray-400 py-4">На цю дату немає вільних місць</div>';
+    return;
+  }
+
   const dur = parseInt(state.duration || '1', 10);
-  const maxStart = TIME_SLOTS.length - dur;
-  for (let i=0; i<=maxStart; i++){
-    const label = TIME_SLOTS[i].split('-')[0] + '–' + TIME_SLOTS[i+dur-1].split('-')[1];
+  let anyQuantityBlocked = false;
+
+  (availability.slots || []).forEach(slotInfo => {
+    const start = slotInfo.start;
+    const end = addMinutesToTime(start, dur * 60);
+    const label = `${start}–${end}`;
+    const enoughQty = (slotInfo.maxQty || 0) >= state.quantity;
+    const isSelectable = slotInfo.available && enoughQty;
+    if (slotInfo.available && !enoughQty) anyQuantityBlocked = true;
+
     const btn = document.createElement('button');
-    btn.className = 'time-btn py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium text-sm';
+    btn.className = 'time-btn py-3 rounded-2xl border-2 border-transparent shadow-sm font-medium text-sm '
+      + (isSelectable ? 'bg-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed');
     btn.textContent = label;
-    btn.onclick = () => { selectOne('.time-btn', btn); state.time = TIME_SLOTS[i]; setMainEnabled(true); };
+    btn.disabled = !isSelectable;
+    if (isSelectable){
+      btn.onclick = () => { selectOne('.time-btn', btn); state.time = TIME_SLOTS.find(s => s.startsWith(start)); setMainEnabled(true); };
+    }
     timeGrid.appendChild(btn);
+  });
+
+  if (anyQuantityBlocked){
+    const note = document.createElement('div');
+    note.className = 'col-span-2 text-center text-xs text-red-500 mt-2';
+    note.textContent = `Деякі часові слоти сірі, бо на них немає ${state.quantity} вільних одиниць обладнання — зменшіть кількість на попередньому кроці.`;
+    timeGrid.appendChild(note);
   }
 }
 
 const fullNameInput = document.getElementById('fullName');
 fullNameInput.addEventListener('input', () => { state.fullName = fullNameInput.value.trim(); setMainEnabled(state.fullName.length > 2); });
+
+// Tap anywhere outside an input/textarea to dismiss the keyboard
+document.addEventListener('click', (e) => {
+  const active = document.activeElement;
+  if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') && e.target !== active){
+    active.blur();
+  }
+});
 function renderSummary(){
   const eqLabel = {sup_single:'Сап одномісний',sup_double:'Сап двомісний',kayak_single:'Каяк одномісний',kayak_double:'Каяк двомісний'}[state.equipment] || '';
-  const durLabel = state.duration === 'morning' ? 'Ранковий рафтинг' : (state.duration + ' год');
+  const durLabel = state.duration === 'morning' ? 'Сплав на світанку' : (state.duration + ' год');
   document.getElementById('summaryBox').innerHTML = `
     <div class="flex justify-between"><span>Дата</span><span class="font-medium text-gray-900">${state.date}</span></div>
     <div class="flex justify-between"><span>Тривалість</span><span class="font-medium text-gray-900">${durLabel}</span></div>
@@ -242,8 +339,8 @@ function showStep(n){
   document.getElementById('backBtn').style.visibility = n === 1 ? 'hidden' : 'visible';
   const mainBtn = document.getElementById('mainBtn');
   if (n === 1) setMainEnabled(!!state.date && !!state.duration);
-  if (n === 2) setMainEnabled(!!state.equipment);
-  if (n === 3) { renderTimeSlots(); setMainEnabled(!!state.time); }
+  if (n === 2) { updateEquipmentPrices(); setMainEnabled(!!state.equipment); }
+  if (n === 3) { setMainEnabled(false); renderTimeSlots().then(() => setMainEnabled(!!state.time)); }
   if (n === 4) { renderSummary(); setMainEnabled(state.fullName.length > 2); mainBtn.textContent = 'Поділитись номером і забронювати'; }
   else mainBtn.textContent = 'Далі';
 }
@@ -259,16 +356,33 @@ function submitBooking(){
 }
 showStep(1);
 
-/* ================= MY BOOKINGS (mock) ================= */
-const mockBookings = [
-  { code:'04231', date:'12.07.2026', time:'14:00-15:00', equipment:'Сап одномісний × 2' },
-  { code:'09817', date:'15.07.2026', time:'05:45-08:00', equipment:'Ранковий рафтинг · Каяк двомісний' }
-];
+/* ================= MY BOOKINGS (dynamic) ================= */
 const bookingsList = document.getElementById('bookingsList');
-if (mockBookings.length === 0){
-  bookingsList.innerHTML = `<div class="text-center text-gray-400 text-sm mt-10">У вас поки немає активних бронювань</div>`;
-} else {
-  mockBookings.forEach(b => {
+
+async function fetchMyBookings(){
+  const userId = tg?.initDataUnsafe?.user?.id;
+  if (!userId || !API_BASE_URL) return [];
+  try {
+    const res = await fetch(`${API_BASE_URL}/mybookings?user_id=${userId}`);
+    if (!res.ok) throw new Error('bad response');
+    return await res.json();
+  } catch (e) {
+    console.error('fetchMyBookings failed:', e);
+    return [];
+  }
+}
+
+async function renderBookings(){
+  bookingsList.innerHTML = `<div class="text-center text-gray-400 text-sm mt-10">Завантаження…</div>`;
+  const bookings = await fetchMyBookings();
+
+  if (bookings.length === 0){
+    bookingsList.innerHTML = `<div class="text-center text-gray-400 text-sm mt-10">У вас ще немає бронювань</div>`;
+    return;
+  }
+
+  bookingsList.innerHTML = '';
+  bookings.forEach(b => {
     const card = document.createElement('div');
     card.className = 'bg-white rounded-2xl p-4 shadow-sm';
     card.innerHTML = `
@@ -284,6 +398,8 @@ if (mockBookings.length === 0){
     bookingsList.appendChild(card);
   });
 }
+renderBookings();
+
 function cancelBooking(code, cardEl){
   tg?.sendData(JSON.stringify({ type:'cancel', cancel_code: code }));
   cardEl.style.opacity = '0.4';

@@ -3,6 +3,7 @@ import gspread
 import socket
 import random
 import os
+from aiohttp import web
 from dotenv import load_dotenv
 from google.auth.exceptions import RefreshError
 from zoneinfo import ZoneInfo
@@ -1452,8 +1453,8 @@ async def finalize_booking(message: types.Message, state: FSMContext, phone: str
     user_chat_id = message.chat.id
     quantity = int(data.get('quantity', 1))
 
-    # booking_value written to cells: ID, name, phone only
-    booking_lines = [f"ID:{booking_code}", client_name, phone]
+    # booking_value written to cells: ID, name, phone, telegram user id
+    booking_lines = [f"ID:{booking_code}", client_name, phone, f"UID:{user_chat_id}"]
     if equipment_note:
         booking_lines.append(equipment_note)
     booking_value = "\n".join(booking_lines)
@@ -1609,10 +1610,202 @@ async def finalize_booking(message: types.Message, state: FSMContext, phone: str
         )
     await state.clear()
 
+WEBAPP_API_PORT = int(os.getenv("WEBAPP_API_PORT", "8081"))
+
+
+def _cors_headers():
+    return {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+    }
+
+
+async def api_options(request: web.Request) -> web.Response:
+    return web.Response(headers=_cors_headers())
+
+
+def _sup_max_qty(all_values, row_idx: int, duration: int, requested_equipment: str) -> int:
+    """How many SUPs (including cross-type fallback) are free for this slot."""
+    single_cols = get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS["sup_single"])
+    double_cols = get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS["sup_double"])
+    primary_cols, fallback_cols = (single_cols, double_cols) if requested_equipment == "sup_single" else (double_cols, single_cols)
+    free_primary = find_free_columns_for_duration(all_values, row_idx, duration, primary_cols, 999)
+    free_fallback = find_free_columns_for_duration(all_values, row_idx, duration, fallback_cols, 999)
+    return min(10, len(free_primary) + len(free_fallback))
+
+
+async def api_availability(request: web.Request) -> web.Response:
+    headers = _cors_headers()
+    try:
+        date_str = request.query.get("date", "")
+        equipment = request.query.get("equipment", "")
+        duration_param = request.query.get("duration", "1")
+
+        if equipment not in EQUIPMENT_COLUMN_GROUPS:
+            return web.json_response({"error": "invalid equipment"}, status=400, headers=headers)
+        try:
+            datetime.strptime(date_str, "%d.%m")
+        except ValueError:
+            return web.json_response({"error": "invalid date, expected dd.mm"}, status=400, headers=headers)
+
+        ws = get_or_create_sheet(date_str)
+        all_values = ws.get_all_values()
+
+        current_time = get_current_time()
+        today_str = current_time.strftime("%d.%m")
+        now_time = current_time.time()
+
+        if duration_param == "morning":
+            if is_weather_blocked_sheet(all_values):
+                return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
+
+            ensure_morning_table(ws)
+            if is_morning_weather_blocked(ws):
+                return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
+
+            confirmed = is_morning_confirmed(ws)
+            past_deadline = current_time >= get_morning_booking_deadline(date_str)
+            if past_deadline and not confirmed:
+                return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
+
+            fresh_vals = ws.get_all_values()
+            header_row_idx = None
+            for r_idx, row in enumerate(fresh_vals):
+                if row and isinstance(row[0], str) and row[0].strip().lower().startswith("ранков"):
+                    header_row_idx = r_idx
+                    break
+            if header_row_idx is None:
+                return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
+
+            write_row = header_row_idx + 2
+            if equipment.startswith("sup_"):
+                max_qty = _sup_max_qty(fresh_vals, write_row, 1, equipment)
+            else:
+                target_cols = get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS[equipment])
+                max_qty = len(find_free_columns_for_duration(fresh_vals, write_row, 1, target_cols, 999))
+
+            return web.json_response({"closed": False, "available": max_qty > 0, "maxQty": max_qty}, headers=headers)
+
+        duration = int(duration_param)
+        if duration not in (1, 2):
+            return web.json_response({"error": "invalid duration"}, status=400, headers=headers)
+
+        if is_weather_blocked_sheet(all_values):
+            return web.json_response({"closed": True, "slots": []}, headers=headers)
+
+        target_cols = get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS[equipment])
+        max_start_index = len(TIME_SLOTS) - duration
+        slots = []
+
+        for start_index in range(max_start_index + 1):
+            start_time_str = TIME_SLOTS[start_index].split('-')[0]
+            start_time = datetime.strptime(start_time_str, "%H:%M").time()
+            row_idx = start_index + 2
+
+            if date_str == today_str and start_time <= now_time:
+                slots.append({"start": start_time_str, "available": False, "maxQty": 0})
+                continue
+
+            if is_weather_blocked_slot(all_values, row_idx, duration, target_cols):
+                slots.append({"start": start_time_str, "available": False, "maxQty": 0})
+                continue
+
+            if is_live_queue_only_slot(all_values, row_idx, duration, target_cols):
+                # Mini app doesn't support the live-queue flow — treat as unavailable here.
+                slots.append({"start": start_time_str, "available": False, "maxQty": 0})
+                continue
+
+            booking_resolution = resolve_equipment_booking(equipment, all_values, row_idx, duration)
+            if not booking_resolution:
+                slots.append({"start": start_time_str, "available": False, "maxQty": 0})
+                continue
+
+            if equipment.startswith("sup_"):
+                max_qty = _sup_max_qty(all_values, row_idx, duration, equipment)
+            else:
+                max_qty = 1
+
+            slots.append({"start": start_time_str, "available": max_qty > 0, "maxQty": max_qty})
+
+        return web.json_response({"closed": False, "slots": slots}, headers=headers)
+
+    except Exception as e:
+        print(f"[ERROR] api_availability: {e}")
+        return web.json_response({"error": "internal error"}, status=500, headers=headers)
+
+
+async def api_mybookings(request: web.Request) -> web.Response:
+    headers = _cors_headers()
+    try:
+        user_id = request.query.get("user_id", "")
+        if not user_id:
+            return web.json_response({"error": "missing user_id"}, status=400, headers=headers)
+        marker = f"UID:{user_id}"
+
+        results = {}  # (date, code) -> {rows:set, cols:set, is_morning:bool}
+        for ws in get_booking_worksheets_from_today():
+            date_str = ws.title
+            all_values = ws.get_all_values()
+            for r_idx, row in enumerate(all_values, start=1):
+                for c_idx, cell in enumerate(row, start=1):
+                    if marker in cell:
+                        code = None
+                        for line in cell.split("\n"):
+                            if line.startswith("ID:"):
+                                code = line[3:]
+                                break
+                        if not code:
+                            continue
+                        key = (date_str, code)
+                        entry = results.setdefault(key, {"rows": set(), "cols": set(), "is_morning": r_idx > len(TIME_SLOTS) + 1})
+                        entry["rows"].add(r_idx)
+                        entry["cols"].add(c_idx)
+
+        bookings = []
+        for (date_str, code), entry in results.items():
+            equipment_names = sorted({get_equipment_name_for_column(c) for c in entry["cols"]})
+            qty = len(entry["cols"])
+            equipment_label = f"{', '.join(equipment_names)} × {qty}" if qty > 1 else (equipment_names[0] if equipment_names else "Невідомо")
+
+            if entry["is_morning"]:
+                time_label = "Сплав на світанку"
+            else:
+                rows = sorted(entry["rows"])
+                start_idx = rows[0] - 2
+                end_idx = rows[-1] - 2
+                if 0 <= start_idx < len(TIME_SLOTS) and 0 <= end_idx < len(TIME_SLOTS):
+                    time_label = f"{TIME_SLOTS[start_idx].split('-')[0]}-{TIME_SLOTS[end_idx].split('-')[1]}"
+                else:
+                    time_label = "Невідомо"
+
+            bookings.append({"code": code, "date": date_str, "time": time_label, "equipment": equipment_label})
+
+        return web.json_response(bookings, headers=headers)
+
+    except Exception as e:
+        print(f"[ERROR] api_mybookings: {e}")
+        return web.json_response({"error": "internal error"}, status=500, headers=headers)
+
+
+async def start_web_api():
+    app = web.Application()
+    app.router.add_get("/api/availability", api_availability)
+    app.router.add_get("/api/mybookings", api_mybookings)
+    app.router.add_route("OPTIONS", "/api/availability", api_options)
+    app.router.add_route("OPTIONS", "/api/mybookings", api_options)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", WEBAPP_API_PORT)
+    await site.start()
+    print(f"[INFO] Availability API listening on 0.0.0.0:{WEBAPP_API_PORT}")
+
+
 async def main():
     await bot.set_my_commands([
         BotCommand(command="start", description="Bot Restart"),
     ])
+    await start_web_api()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
