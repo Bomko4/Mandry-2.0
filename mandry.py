@@ -776,24 +776,22 @@ def is_weather_blocked_sheet(all_values) -> bool:
                 return False
     return True
 
+
+def build_main_keyboard() -> types.ReplyKeyboardMarkup:
+    return types.ReplyKeyboardMarkup(
+        keyboard=[
+            [types.KeyboardButton(text="Відкрити застосунок", web_app=types.WebAppInfo(url=WEBAPP_URL))],
+        ],
+        resize_keyboard=True,
+    )
+
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
 
-    reply_keyboard = types.ReplyKeyboardMarkup(
-        keyboard=[
-            [types.KeyboardButton(text="📚 Забронювати", web_app=types.WebAppInfo(url=WEBAPP_URL))],
-            [types.KeyboardButton(text="❌ Скасувати бронювання")],
-            [types.KeyboardButton(text="📋 Правила користування"), types.KeyboardButton(text="🚨 Краш ліст")],
-            [types.KeyboardButton(text="🍽️ Меню")],
-            [types.KeyboardButton(text="📞 Контакти")]
-        ],
-        resize_keyboard=True
-    )
+    await message.answer("Головне меню:", reply_markup=build_main_keyboard())
 
-    await message.answer("Головне меню:", reply_markup=reply_keyboard)
-
-@dp.message(F.text == "📚 Забронювати")
+@dp.message(F.text.in_(["📚 Забронювати", "Відкрити застосунок"]))
 async def start_booking_from_menu(message: types.Message, state: FSMContext):
     builder = InlineKeyboardBuilder()
     now = get_current_time()
@@ -852,8 +850,8 @@ async def show_prev_dates(callback: types.CallbackQuery):
 @dp.message(F.text == "🍽️ Меню")
 async def show_prices(message: types.Message):
     builder = InlineKeyboardBuilder()
-    builder.row(types.InlineKeyboardButton(text="Відкрити меню", url=MENU_URL))
-    await message.answer("Натисніть кнопку нижче, щоб відкрити меню:", reply_markup=builder.as_markup())
+    builder.row(types.InlineKeyboardButton(text="Відкрити застосунок", url=WEBAPP_URL))
+    await message.answer("Натисніть кнопку нижче, щоб відкрити застосунок:", reply_markup=builder.as_markup())
 
 
 @dp.message(F.text == "❌ Скасувати бронювання")
@@ -1424,13 +1422,22 @@ async def process_name(message: types.Message, state: FSMContext):
 
 @dp.message(Booking.phone)
 async def process_phone(message: types.Message, state: FSMContext):
-    if message.contact:
-        phone = message.contact.phone_number
-        if not phone.startswith("+"):
-            phone = "+" + phone
-    else:
-        await message.answer("Будь ласка, скористайтесь кнопкою нижче щоб поділитись номером.")
+    phone = ""
+    if message.contact and message.contact.phone_number:
+        phone = message.contact.phone_number.strip()
+    elif message.text:
+        phone = message.text.strip()
+
+    if not phone:
+        await message.answer("Будь ласка, надішліть номер телефону або скористайтесь кнопкою нижче.")
         return
+
+    normalized_phone = normalize_phone_number(phone)
+    if len(normalized_phone) < 10:
+        await message.answer("❌ Невірний номер телефону. Надішліть номер ще раз або поділіться контактом через кнопку.")
+        return
+
+    phone = f"+{normalized_phone}" if not phone.startswith("+") else phone
 
     data = await state.get_data()
     client_name = data.get('client_name', '')
@@ -1605,13 +1612,8 @@ async def finalize_booking(message: types.Message, state: FSMContext, phone: str
             print("[WARNING] STAFF_CHAT_ID не задано")
 
         reply_keyboard = types.ReplyKeyboardMarkup(
-            keyboard=[
-                [types.KeyboardButton(text="📚 Забронювати"), types.KeyboardButton(text="❌ Скасувати бронювання")],
-                [types.KeyboardButton(text="📋 Правила користування"), types.KeyboardButton(text="🚨 Краш ліст")],
-                [types.KeyboardButton(text="🍽️ Меню")],
-                [types.KeyboardButton(text="📞 Контакти")]
-            ],
-            resize_keyboard=True
+            keyboard=[[types.KeyboardButton(text="Відкрити застосунок", web_app=types.WebAppInfo(url=WEBAPP_URL))]],
+            resize_keyboard=True,
         )
         if data.get('morning'):
             await message.answer(
