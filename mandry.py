@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import gspread
 import socket
 import random
@@ -83,6 +84,11 @@ EQUIPMENT_COLUMN_GROUPS = {
     "kayak_single": ["Каяк одномісний"],
     "kayak_double": ["Каяк двомісний"],
 }
+
+
+def get_booking_owner_key(user_id: int | str) -> str:
+    digest = hashlib.sha256(str(user_id).encode("utf-8")).hexdigest()[:16]
+    return f"OWNER:{digest}"
 
 try:
     gc = gspread.service_account(filename=GOOGLE_CREDENTIALS_PATH)
@@ -1467,7 +1473,7 @@ async def finalize_booking(message: types.Message, state: FSMContext, phone: str
         return
 
     # booking_value written to cells: ID, name, phone, telegram user id
-    booking_lines = [f"ID:{booking_code}", client_name, phone, f"UID:{user_chat_id}"]
+    booking_lines = [f"ID:{booking_code}", client_name, phone, get_booking_owner_key(user_chat_id)]
     if equipment_note:
         booking_lines.append(equipment_note)
     booking_value = "\n".join(booking_lines)
@@ -1780,7 +1786,7 @@ async def api_mybookings(request: web.Request) -> web.Response:
         user_id = request.query.get("user_id", "")
         if not user_id:
             return web.json_response({"error": "missing user_id"}, status=400, headers=headers)
-        marker = f"UID:{user_id}"
+        markers = {get_booking_owner_key(user_id), f"UID:{user_id}"}
 
         results = {}  # (date, code) -> {rows:set, cols:set, is_morning:bool}
         for ws in get_booking_worksheets_from_today():
@@ -1788,7 +1794,7 @@ async def api_mybookings(request: web.Request) -> web.Response:
             all_values = ws.get_all_values()
             for r_idx, row in enumerate(all_values, start=1):
                 for c_idx, cell in enumerate(row, start=1):
-                    if marker in cell:
+                    if any(marker in cell for marker in markers):
                         code = None
                         for line in cell.split("\n"):
                             if line.startswith("ID:"):
