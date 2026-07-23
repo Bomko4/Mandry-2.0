@@ -122,9 +122,8 @@
 const tg = window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
 
-// Set this to your bot server's HTTPS API URL, e.g. "https://mandrysup.duckdns.org/api"
-// (must be HTTPS — a Mini App served over HTTPS cannot call an http:// endpoint).
-const API_BASE_URL = "https://mandrysup.duckdns.org/api";
+// Use the same origin as the hosted Mini App so the backend can be proxied in Nginx.
+const API_BASE_URL = `${window.location.origin}/api`;
 
 const TIME_SLOTS = ["10:15-11:15","11:30-12:30","12:45-13:45","14:00-15:00","15:15-16:15","16:30-17:30","17:45-18:45","19:00-20:00","20:10-21:10"];
 const MORNING_WINDOW = "05:45-08:00";
