@@ -1844,6 +1844,12 @@ async def main():
     await bot.set_my_commands([
         BotCommand(command="start", description="Bot Restart"),
     ])
+    await bot.set_chat_menu_button(
+        menu_button=types.MenuButtonWebApp(
+            text="Відкрити застосунок",
+            web_app=types.WebAppInfo(url=WEBAPP_URL),
+        )
+    )
     await start_web_api()
     await dp.start_polling(bot)
 
