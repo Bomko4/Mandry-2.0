@@ -1025,95 +1025,22 @@ async def process_web_app_data(message: types.Message, state: FSMContext):
     quantity = int(payload.get("quantity", 1))
     time_slot = payload.get("time")
     client_name = payload.get("full_name", "").strip()
-    phone = payload.get("phone", "")
-
     if not (selected_date and duration_raw and equipment and client_name):
         await message.answer("❌ Дані бронювання неповні. Спробуйте ще раз через міні-застосунок.")
         return
     if equipment not in EQUIPMENT_COLUMN_GROUPS:
         await message.answer("❌ Невідомий тип обладнання.")
         return
-    if not phone:
-        await message.answer("❌ Не вдалося отримати номер телефону. Спробуйте ще раз і поділіться контактом.")
-        return
-    if not phone.startswith("+"):
-        phone = "+" + phone
 
-    is_morning = (duration_raw == "morning")
-    ws = get_or_create_sheet(selected_date)
-    all_values = ws.get_all_values()
-
-    if is_weather_blocked_sheet(all_values):
-        await message.answer("Прогнозується негода, тому ми зачинені на цю дату🏄‍♂️")
-        return
-
-    data = {"date": selected_date, "equipment": equipment, "quantity": quantity}
-
-    if is_morning:
-        ensure_morning_table(ws)
-        if is_morning_weather_blocked(ws):
-            await message.answer("На цю дату не плануємо ранковий сплав")
-            return
-        confirmed = is_morning_confirmed(ws)
-        past_deadline = get_current_time() >= get_morning_booking_deadline(selected_date)
-        if past_deadline and not confirmed:
-            await message.answer("Ранковий сплав на цю дату недоступний: до 19:00 не набралося 6 учасників.")
-            return
-
-        data["morning"] = True
-        data["duration"] = 1
-    else:
-        duration = int(duration_raw)
-        if not time_slot or time_slot not in TIME_SLOTS:
-            await message.answer("❌ Невірний часовий слот.")
-            return
-        start_index = TIME_SLOTS.index(time_slot)
-        row_idx = start_index + 2
-
-        if row_idx + duration - 1 > len(TIME_SLOTS) + 1:
-            await message.answer("❌ Для цієї тривалості оберіть раніший старт.")
-            return
-
-        preferred_names = EQUIPMENT_COLUMN_GROUPS[equipment]
-        target_cols = get_target_columns_for_names(preferred_names)
-
-        if is_live_queue_only_slot(all_values, row_idx, duration, target_cols):
-            await message.answer("⏳ На цей час доступна лише жива черга. Скористайтесь текстовим меню бота.")
-            return
-
-        booking_resolution = resolve_equipment_booking(equipment, all_values, row_idx, duration)
-        if not booking_resolution:
-            await message.answer("❌ Немає вільних місць на обраний час. Спробуйте інший слот.")
-            return
-
-        data.update(
-            duration=duration,
-            time_row=row_idx,
-            equip_col=booking_resolution["equip_col"],
-            actual_equipment=booking_resolution["actual_equipment"],
-            equipment_note=booking_resolution["note"],
-            resolved_equipment=booking_resolution.get("resolved_equipment", equipment),
-        )
-
-        if equipment.startswith("sup_") and quantity > 1:
-            single_cols = get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS["sup_single"])
-            double_cols = get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS["sup_double"])
-            if equipment == "sup_single":
-                primary_cols, fallback_cols = single_cols, double_cols
-            else:
-                primary_cols, fallback_cols = double_cols, single_cols
-
-            free_primary = find_free_columns_for_duration(all_values, row_idx, duration, primary_cols, quantity)
-            needed = quantity - len(free_primary)
-            free_fallback = find_free_columns_for_duration(all_values, row_idx, duration, fallback_cols, needed) if needed > 0 else []
-            free_cols = free_primary + free_fallback
-
-            if len(free_cols) < quantity:
-                await message.answer("❌ На цей час немає достатньої кількості вільних сапів.")
-                return
-            data["equip_cols"] = free_cols
-
-    await finalize_booking(message, state, phone, client_name, data)
+    await state.update_data(pending_webapp_booking=payload)
+    phone_keyboard = types.ReplyKeyboardMarkup(
+        keyboard=[[types.KeyboardButton(text="📱 Поділитись номером", request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
+    await message.answer("Надішліть ваш номер телефону:", reply_markup=phone_keyboard)
+    await state.set_state(Booking.phone)
+    return
 
 
 @dp.message(Booking.cancel_code)
@@ -1506,8 +1433,9 @@ async def process_phone(message: types.Message, state: FSMContext):
     phone = f"+{normalized_phone}" if not phone.startswith("+") else phone
 
     data = await state.get_data()
-    client_name = data.get('client_name', '')
-    await finalize_booking(message, state, phone, client_name, data)
+    booking_data = data.get('pending_webapp_booking') or data
+    client_name = booking_data.get('full_name', data.get('client_name', '')).strip()
+    await finalize_booking(message, state, phone, client_name, booking_data)
 
 
 async def finalize_booking(message: types.Message, state: FSMContext, phone: str, client_name: str, data: dict):

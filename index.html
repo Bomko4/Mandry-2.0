@@ -57,10 +57,6 @@
           <label class="text-xs text-gray-400">Ім'я та прізвище</label>
           <input id="fullName" type="text" placeholder="Іван Петренко" class="w-full mt-1 text-base outline-none placeholder-gray-300">
         </div>
-        <div class="bg-white rounded-2xl p-4 shadow-sm mb-4">
-          <label class="text-xs text-gray-400">Номер телефону</label>
-          <input id="phoneNumber" type="tel" placeholder="+380XXXXXXXXX" class="w-full mt-1 text-base outline-none placeholder-gray-300">
-        </div>
         <div id="summaryBox" class="bg-white rounded-2xl p-4 shadow-sm text-sm space-y-1 text-gray-600"></div>
       </section>
     </div>
@@ -149,7 +145,7 @@ function switchTab(name){
 switchTab('book');
 
 /* ================= BOOKING WIZARD ================= */
-let state = { date:null, duration:null, equipment:null, quantity:1, time:null, fullName:'', phone:'' };
+let state = { date:null, duration:null, equipment:null, quantity:1, time:null, fullName:'' };
 let step = 1;
 
 const dateScroll = document.getElementById('dateScroll');
@@ -315,9 +311,6 @@ async function renderTimeSlots(){
 const fullNameInput = document.getElementById('fullName');
 fullNameInput.addEventListener('input', () => { state.fullName = fullNameInput.value.trim(); setMainEnabled(state.fullName.length > 2); });
 
-const phoneInput = document.getElementById('phoneNumber');
-phoneInput.addEventListener('input', () => { state.phone = phoneInput.value.trim(); setMainEnabled(state.fullName.length > 2 && state.phone.length > 7); });
-
 // Tap anywhere outside an input/textarea to dismiss the keyboard
 document.addEventListener('click', (e) => {
   const active = document.activeElement;
@@ -332,7 +325,8 @@ function renderSummary(){
     <div class="flex justify-between"><span>Дата</span><span class="font-medium text-gray-900">${state.date}</span></div>
     <div class="flex justify-between"><span>Тривалість</span><span class="font-medium text-gray-900">${durLabel}</span></div>
     <div class="flex justify-between"><span>Спорядження</span><span class="font-medium text-gray-900">${eqLabel} × ${state.quantity}</span></div>
-    <div class="flex justify-between"><span>Час</span><span class="font-medium text-gray-900">${state.time}</span></div>`;
+    <div class="flex justify-between"><span>Час</span><span class="font-medium text-gray-900">${state.time}</span></div>
+    <div class="flex justify-between"><span>Контакт</span><span class="font-medium text-gray-900">Через Telegram</span></div>`;
 }
 
 function selectOne(selector, active){
@@ -350,15 +344,15 @@ function showStep(n){
   if (n === 1) setMainEnabled(!!state.date && !!state.duration);
   if (n === 2) { updateEquipmentPrices(); setMainEnabled(!!state.equipment); }
   if (n === 3) { setMainEnabled(false); renderTimeSlots().then(() => setMainEnabled(!!state.time)); }
-  if (n === 4) { renderSummary(); setMainEnabled(state.fullName.length > 2 && state.phone.length > 7); mainBtn.textContent = 'Забронювати'; }
+  if (n === 4) { renderSummary(); setMainEnabled(state.fullName.length > 2); mainBtn.textContent = 'Забронювати'; }
   else mainBtn.textContent = 'Далі';
 }
 function nextStep(){ if (step === 4){ submitBooking(); return; } step++; showStep(step); }
 function prevStep(){ if (step === 1) return; step--; showStep(step); }
 
 function submitBooking(){
-  if (!state.phone || state.phone.length < 7){
-    alert('Введіть номер телефону перед бронюванням.');
+  if (state.fullName.length < 3){
+    alert('Введіть ім’я та прізвище перед бронюванням.');
     return;
   }
   const payload = {
@@ -369,7 +363,6 @@ function submitBooking(){
     quantity: state.quantity,
     time: state.time,
     full_name: state.fullName,
-    phone: state.phone,
   };
   tg?.sendData(JSON.stringify(payload));
   tg?.close();
