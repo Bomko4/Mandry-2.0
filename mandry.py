@@ -1440,18 +1440,24 @@ async def process_phone(message: types.Message, state: FSMContext):
 async def finalize_booking(message: types.Message, state: FSMContext, phone: str, client_name: str, data: dict):
     await message.answer("Відбувається процес бронювання!\nДякуємо за очікування💙")
 
-    if is_phone_blacklisted(phone):
-        await message.answer("❌ Цей номер телефону є у чорному списку. Бронювання недоступне.")
+    try:
+        if is_phone_blacklisted(phone):
+            await message.answer("❌ Цей номер телефону є у чорному списку. Бронювання недоступне.")
+            await state.clear()
+            return
+
+        ws = get_or_create_sheet(data['date'])
+        duration = int(data.get('duration', 1))
+        booking_code = generate_booking_code()
+        actual_equipment = data.get('actual_equipment', data['equipment'])
+        equipment_note = data.get('equipment_note', '')
+        user_chat_id = message.chat.id
+        quantity = int(data.get('quantity', 1))
+    except Exception as e:
+        print(f"[ERROR] finalize_booking - initialization failed: {e}")
+        await message.answer("❌ Помилка при ініціалізації бронювання. Спробуйте ще раз.")
         await state.clear()
         return
-
-    ws = get_or_create_sheet(data['date'])
-    duration = int(data.get('duration', 1))
-    booking_code = generate_booking_code()
-    actual_equipment = data.get('actual_equipment', data['equipment'])
-    equipment_note = data.get('equipment_note', '')
-    user_chat_id = message.chat.id
-    quantity = int(data.get('quantity', 1))
 
     # booking_value written to cells: ID, name, phone, telegram user id
     booking_lines = [f"ID:{booking_code}", client_name, phone, f"UID:{user_chat_id}"]
@@ -1461,154 +1467,185 @@ async def finalize_booking(message: types.Message, state: FSMContext, phone: str
 
     # --- РАНКОВИЙ СПЛАВ ---
     if data.get('morning'):
-        booking_window = MORNING_WINDOW
-        actual_equipment = EQUIPMENT_LABELS.get(data.get('equipment'), data.get('equipment'))
+        try:
+            booking_window = MORNING_WINDOW
+            actual_equipment = EQUIPMENT_LABELS.get(data.get('equipment'), data.get('equipment'))
 
-        async with get_sheet_lock(data['date']):
-            all_vals = ensure_morning_table(ws)
+            async with get_sheet_lock(data['date']):
+                all_vals = ensure_morning_table(ws)
 
-            header_row_idx = None
-            for r_idx, row in enumerate(all_vals):
-                if row and len(row) > 0 and isinstance(row[0], str) and row[0].strip().lower().startswith("ранков"):
-                    header_row_idx = r_idx
-                    break
+                header_row_idx = None
+                for r_idx, row in enumerate(all_vals):
+                    if row and len(row) > 0 and isinstance(row[0], str) and row[0].strip().lower().startswith("ранков"):
+                        header_row_idx = r_idx
+                        break
 
-            if header_row_idx is None:
-                await message.answer("❌ Сталася помилка структури таблиці. Спробуйте ще раз або зверніться до адміністратора.")
-                await state.clear()
-                return
+                if header_row_idx is None:
+                    await message.answer("❌ Сталася помилка структури таблиці. Спробуйте ще раз або зверніться до адміністратора.")
+                    await state.clear()
+                    return
 
-            write_row = header_row_idx + 2  # header row + 1 data row (1-based)
+                write_row = header_row_idx + 2  # header row + 1 data row (1-based)
 
-            requested_equipment = data.get('equipment')
-            target_cols = get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS[requested_equipment])
+                requested_equipment = data.get('equipment')
+                target_cols = get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS[requested_equipment])
 
-            free_cols = find_free_columns_for_duration(all_vals, write_row, 1, target_cols, quantity)
+                free_cols = find_free_columns_for_duration(all_vals, write_row, 1, target_cols, quantity)
 
-            if len(free_cols) < quantity:
-                await message.answer("❌ Не вдалося зафіксувати бронювання: недостатньо вільних сапів на цей час.")
-                await state.clear()
-                return
-
-            for col in free_cols:
-                start_cell = gspread.utils.rowcol_to_a1(write_row, col)
-                ws.update(start_cell, [[booking_value]])
-
-        duration = 1
-
-    # --- ЗВИЧАЙНИЙ СПЛАВ ---
-    else:
-        async with get_sheet_lock(data['date']):
-            # Re-check availability under the lock to avoid races overwriting another booking
-            fresh_values = ws.get_all_values()
-            if quantity > 1:
-                requested_equipment = data.get('resolved_equipment', data.get('equipment'))
-                preferred_cols = get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS.get(requested_equipment, []))
-                single_cols = get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS["sup_single"])
-                double_cols = get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS["sup_double"])
-                original_equipment = data.get('equipment')
-                if original_equipment == "sup_single":
-                    primary_cols, fallback_cols = single_cols, double_cols
-                else:
-                    primary_cols, fallback_cols = double_cols, single_cols
-
-                free_primary = find_free_columns_for_duration(fresh_values, data['time_row'], duration, primary_cols, quantity)
-                needed = quantity - len(free_primary)
-                free_fallback = find_free_columns_for_duration(fresh_values, data['time_row'], duration, fallback_cols, needed) if needed > 0 else []
-                equip_cols = free_primary + free_fallback
-
-                if len(equip_cols) < quantity:
+                if len(free_cols) < quantity:
                     await message.answer("❌ Не вдалося зафіксувати бронювання: недостатньо вільних сапів на цей час.")
                     await state.clear()
                     return
 
-                for row_offset in range(duration):
-                    row_idx = data['time_row'] + row_offset
-                    for col in equip_cols:
-                        start_cell = gspread.utils.rowcol_to_a1(row_idx, col)
-                        ws.update(start_cell, [[booking_value]])
-            else:
-                if _col_status(fresh_values, data['time_row'], duration, data['equip_col']) != "free":
-                    await message.answer("❌ На жаль, це місце вже зайняли. Спробуйте інший час або обладнання.")
-                    await state.clear()
-                    return
-                start_cell = gspread.utils.rowcol_to_a1(data['time_row'], data['equip_col'])
-                end_cell = gspread.utils.rowcol_to_a1(data['time_row'] + duration - 1, data['equip_col'])
-                ws.update(f"{start_cell}:{end_cell}", [[booking_value] for _ in range(duration)])
+                for col in free_cols:
+                    start_cell = gspread.utils.rowcol_to_a1(write_row, col)
+                    ws.update(start_cell, [[booking_value]])
 
-        start_slot_index = data['time_row'] - 2
-        booking_window = build_time_window(start_slot_index, duration)
-
-    schedule_booking_reminder(
-        user_chat_id=user_chat_id,
-        booking_code=booking_code,
-        booking_date=data['date'],
-        booking_window=booking_window,
-        actual_equipment=actual_equipment,
-        equipment_note=equipment_note,
-    )
-
-    if data.get('morning'):
-        morning_booking_chat_ids.setdefault(data['date'], set()).add(user_chat_id)
-        schedule_morning_finalization(data['date'])
-
-    notify_text = (
-        "Нове бронювання!\n"
-        f"Код: {booking_code}\n"
-        f"Дата: {data['date']}\n"
-        f"Час: {booking_window}\n"
-        f"Тривалість: {duration} год\n"
-        f"Кількість сапів: {quantity}\n"
-        f"Обладнання: {actual_equipment} {equipment_note}".rstrip() + "\n"
-        f"Клієнт: {client_name}\n"
-        f"Телефон: {phone}"
-    )
-    if STAFF_CHAT_ID is not None:
-        try:
-            print(f"[INFO] Надсилаємо повідомлення в чат {STAFF_CHAT_ID}")
-            await bot.send_message(chat_id=STAFF_CHAT_ID, text=notify_text)
-            print(f"[INFO] Повідомлення успішно надіслано")
+            duration = 1
         except Exception as e:
-            print(f"[ERROR] Помилка при надсиланні повідомлення в чат персоналу: {e}")
-    else:
-        print("[WARNING] STAFF_CHAT_ID не задано")
+            print(f"[ERROR] finalize_booking - morning booking failed: {e}")
+            await message.answer("❌ Помилка при збереженні ранкового бронювання. Спробуйте ще раз.")
+            await state.clear()
+            return
 
-    reply_keyboard = types.ReplyKeyboardMarkup(
-        keyboard=[
-            [types.KeyboardButton(text="📚 Забронювати"), types.KeyboardButton(text="❌ Скасувати бронювання")],
-            [types.KeyboardButton(text="📋 Правила користування"), types.KeyboardButton(text="🚨 Краш ліст")],
-            [types.KeyboardButton(text="🍽️ Меню")],
-            [types.KeyboardButton(text="📞 Контакти")]
-        ],
-        resize_keyboard=True
-    )
-    if data.get('morning'):
-        await message.answer(
-            f"✅ Бронювання прийнято!\n"
-            f"Дата: {data['date']}\n"
-            f"Ім'я клієнта: {client_name}\n"
-            f"Номер бронювання: {booking_code}\n"
-            f"Тривалість: {duration} год\n"
-            f"Кількість сапів: {quantity}\n"
-            f"Час: {booking_window}\n"
-            f"Обладнання: {actual_equipment} {equipment_note}".rstrip() + "\n"
-            f"Наш менеджер зв'яжеться з вами для оплати та підтвердження бронювання.",
-            reply_markup=reply_keyboard
-        )
+    # --- ЗВИЧАЙНИЙ СПЛАВ ---
     else:
-        await message.answer(
-            f"✅ Записано!\n"
+        try:
+            async with get_sheet_lock(data['date']):
+                # Re-check availability under the lock to avoid races overwriting another booking
+                fresh_values = ws.get_all_values()
+                if quantity > 1:
+                    requested_equipment = data.get('resolved_equipment', data.get('equipment'))
+                    preferred_cols = get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS.get(requested_equipment, []))
+                    single_cols = get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS["sup_single"])
+                    double_cols = get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS["sup_double"])
+                    original_equipment = data.get('equipment')
+                    if original_equipment == "sup_single":
+                        primary_cols, fallback_cols = single_cols, double_cols
+                    else:
+                        primary_cols, fallback_cols = double_cols, single_cols
+
+                    free_primary = find_free_columns_for_duration(fresh_values, data['time_row'], duration, primary_cols, quantity)
+                    needed = quantity - len(free_primary)
+                    free_fallback = find_free_columns_for_duration(fresh_values, data['time_row'], duration, fallback_cols, needed) if needed > 0 else []
+                    equip_cols = free_primary + free_fallback
+
+                    if len(equip_cols) < quantity:
+                        await message.answer("❌ Не вдалося зафіксувати бронювання: недостатньо вільних сапів на цей час.")
+                        await state.clear()
+                        return
+
+                    for row_offset in range(duration):
+                        row_idx = data['time_row'] + row_offset
+                        for col in equip_cols:
+                            start_cell = gspread.utils.rowcol_to_a1(row_idx, col)
+                            ws.update(start_cell, [[booking_value]])
+                else:
+                    # quantity == 1, single equipment item
+                    if 'equip_col' not in data:
+                        print(f"[ERROR] finalize_booking - equip_col missing for single booking")
+                        await message.answer("❌ Помилка: обладнання не обрано правильно. Спробуйте ще раз.")
+                        await state.clear()
+                        return
+                    
+                    if _col_status(fresh_values, data['time_row'], duration, data['equip_col']) != "free":
+                        await message.answer("❌ На жаль, це місце вже зайняли. Спробуйте інший час або обладнання.")
+                        await state.clear()
+                        return
+                    start_cell = gspread.utils.rowcol_to_a1(data['time_row'], data['equip_col'])
+                    end_cell = gspread.utils.rowcol_to_a1(data['time_row'] + duration - 1, data['equip_col'])
+                    ws.update(f"{start_cell}:{end_cell}", [[booking_value] for _ in range(duration)])
+
+            start_slot_index = data['time_row'] - 2
+            booking_window = build_time_window(start_slot_index, duration)
+        except KeyError as e:
+            print(f"[ERROR] finalize_booking - missing data key: {e}")
+            await message.answer("❌ Помилка при обробці даних бронювання. Спробуйте ще раз.")
+            await state.clear()
+            return
+        except Exception as e:
+            print(f"[ERROR] finalize_booking - regular booking failed: {e}")
+            await message.answer("❌ Помилка при збереженні бронювання. Спробуйте ще раз.")
+            await state.clear()
+            return
+
+    try:
+        schedule_booking_reminder(
+            user_chat_id=user_chat_id,
+            booking_code=booking_code,
+            booking_date=data['date'],
+            booking_window=booking_window,
+            actual_equipment=actual_equipment,
+            equipment_note=equipment_note,
+        )
+
+        if data.get('morning'):
+            morning_booking_chat_ids.setdefault(data['date'], set()).add(user_chat_id)
+            schedule_morning_finalization(data['date'])
+
+        notify_text = (
+            "Нове бронювання!\n"
+            f"Код: {booking_code}\n"
             f"Дата: {data['date']}\n"
-            f"Ім'я клієнта: {client_name}\n"
-            f"Номер бронювання: {booking_code}\n"
+            f"Час: {booking_window}\n"
             f"Тривалість: {duration} год\n"
             f"Кількість сапів: {quantity}\n"
-            f"Час: {booking_window}\n"
             f"Обладнання: {actual_equipment} {equipment_note}".rstrip() + "\n"
-            f"Чекаємо вас на воді!",
-            reply_markup=reply_keyboard
+            f"Клієнт: {client_name}\n"
+            f"Телефон: {phone}"
         )
-    await state.clear()
+        if STAFF_CHAT_ID is not None:
+            try:
+                print(f"[INFO] Надсилаємо повідомлення в чат {STAFF_CHAT_ID}")
+                await bot.send_message(chat_id=STAFF_CHAT_ID, text=notify_text)
+                print(f"[INFO] Повідомлення успішно надіслано")
+            except Exception as e:
+                print(f"[ERROR] Помилка при надсиланні повідомлення в чат персоналу: {e}")
+        else:
+            print("[WARNING] STAFF_CHAT_ID не задано")
+
+        reply_keyboard = types.ReplyKeyboardMarkup(
+            keyboard=[
+                [types.KeyboardButton(text="📚 Забронювати"), types.KeyboardButton(text="❌ Скасувати бронювання")],
+                [types.KeyboardButton(text="📋 Правила користування"), types.KeyboardButton(text="🚨 Краш ліст")],
+                [types.KeyboardButton(text="🍽️ Меню")],
+                [types.KeyboardButton(text="📞 Контакти")]
+            ],
+            resize_keyboard=True
+        )
+        if data.get('morning'):
+            await message.answer(
+                f"✅ Бронювання прийнято!\n"
+                f"Дата: {data['date']}\n"
+                f"Ім'я клієнта: {client_name}\n"
+                f"Номер бронювання: {booking_code}\n"
+                f"Тривалість: {duration} год\n"
+                f"Кількість сапів: {quantity}\n"
+                f"Час: {booking_window}\n"
+                f"Обладнання: {actual_equipment} {equipment_note}".rstrip() + "\n"
+                f"Наш менеджер зв'яжеться з вами для оплати та підтвердження бронювання.",
+                reply_markup=reply_keyboard
+            )
+        else:
+            await message.answer(
+                f"✅ Записано!\n"
+                f"Дата: {data['date']}\n"
+                f"Ім'я клієнта: {client_name}\n"
+                f"Номер бронювання: {booking_code}\n"
+                f"Тривалість: {duration} год\n"
+                f"Кількість сапів: {quantity}\n"
+                f"Час: {booking_window}\n"
+                f"Обладнання: {actual_equipment} {equipment_note}".rstrip() + "\n"
+                f"Чекаємо вас на воді!",
+                reply_markup=reply_keyboard
+            )
+        await state.clear()
+    except Exception as e:
+        print(f"[ERROR] finalize_booking - notification/finalization failed: {e}")
+        await message.answer("⚠️ Бронювання було збережено, але сталася помилка при надісланні повідомлення.")
+        await state.clear()
+        return
+
 
 WEBAPP_API_PORT = int(os.getenv("WEBAPP_API_PORT", "8081"))
 
