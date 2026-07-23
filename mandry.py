@@ -3,6 +3,7 @@ import gspread
 import socket
 import random
 import os
+import json
 from aiohttp import web
 from dotenv import load_dotenv
 from google.auth.exceptions import RefreshError
@@ -48,6 +49,7 @@ else:
 GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "credentials.json")
 APP_TIMEZONE = ZoneInfo(os.getenv("BOT_TIMEZONE", "Europe/Kyiv"))
 BLACKLIST_SHEET_NAME = os.getenv("BLACKLIST_SHEET_NAME", "Чорний Список")
+BOOKING_INDEX_PATH = os.path.join(os.path.dirname(__file__), "booking_index.json")
 
 COLUMNS = [
     "Сап білий", "Сап білий", "Сап білий", "Сап білий", "Сап білий", "Сап білий", "Сап білий", "Сап білий", "Сап білий", "Сап білий",
@@ -277,6 +279,66 @@ def generate_booking_code() -> str:
 
 def normalize_phone_number(phone: str) -> str:
     return "".join(ch for ch in phone if ch.isdigit())
+
+
+def load_booking_index() -> dict:
+    try:
+        with open(BOOKING_INDEX_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if isinstance(data, dict) and isinstance(data.get("bookings"), dict):
+                return data
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"[ERROR] load_booking_index: {e}")
+    return {"bookings": {}}
+
+
+def save_booking_index(data: dict) -> None:
+    tmp_path = f"{BOOKING_INDEX_PATH}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, BOOKING_INDEX_PATH)
+
+
+def record_booking_index(booking_code: str, user_id: int, booking_date: str, booking_time: str, equipment: str) -> None:
+    data = load_booking_index()
+    data.setdefault("bookings", {})[booking_code] = {
+        "user_id": str(user_id),
+        "date": booking_date,
+        "time": booking_time,
+        "equipment": equipment,
+        "created_at": get_current_time().isoformat(),
+    }
+    save_booking_index(data)
+
+
+def remove_booking_index(booking_code: str) -> None:
+    data = load_booking_index()
+    if booking_code in data.get("bookings", {}):
+        data["bookings"].pop(booking_code, None)
+        save_booking_index(data)
+
+
+def get_bookings_for_user(user_id: str) -> list[dict]:
+    data = load_booking_index()
+    bookings = []
+    for code, record in data.get("bookings", {}).items():
+        if str(record.get("user_id", "")) != str(user_id):
+            continue
+        bookings.append({
+            "code": code,
+            "date": record.get("date", "Невідомо"),
+            "time": record.get("time", "Невідомо"),
+            "equipment": record.get("equipment", "Невідомо"),
+            "created_at": record.get("created_at", ""),
+        })
+    bookings.sort(key=lambda item: (item.get("date", ""), item.get("created_at", "")), reverse=True)
+    return bookings
+
+
+def get_booking_record(booking_code: str) -> dict | None:
+    return load_booking_index().get("bookings", {}).get(booking_code)
 
 
 def is_phone_blacklisted(phone: str) -> bool:
@@ -931,6 +993,7 @@ async def process_web_app_data(message: types.Message, state: FSMContext):
             return
 
         cancel_reminder_task(code)
+        remove_booking_index(code)
         cancellation_dt = get_current_time().strftime("%d.%m.%Y %H:%M")
         cancel_notify = (
             "Скасування бронювання! (Mini App)\n"
@@ -1069,6 +1132,7 @@ async def process_cancel_booking(message: types.Message, state: FSMContext):
         return
 
     cancel_reminder_task(code)
+    remove_booking_index(code)
 
     cancellation_dt = get_current_time().strftime("%d.%m.%Y %H:%M")
     cancel_notify = (
@@ -1111,6 +1175,8 @@ async def process_reminder_no(callback: types.CallbackQuery):
         await callback.message.edit_text("❌ Бронювання вже неактуальне або не знайдено.")
         await callback.answer()
         return
+
+    remove_booking_index(code)
 
     cancellation_dt = get_current_time().strftime("%d.%m.%Y %H:%M")
     if STAFF_CHAT_ID is not None:
@@ -1466,8 +1532,8 @@ async def finalize_booking(message: types.Message, state: FSMContext, phone: str
         await state.clear()
         return
 
-    # booking_value written to cells: ID, name, phone, telegram user id
-    booking_lines = [f"ID:{booking_code}", client_name, phone, f"UID:{user_chat_id}"]
+    # booking_value written to cells: ID, name, phone
+    booking_lines = [f"ID:{booking_code}", client_name, phone]
     if equipment_note:
         booking_lines.append(equipment_note)
     booking_value = "\n".join(booking_lines)
@@ -1589,6 +1655,8 @@ async def finalize_booking(message: types.Message, state: FSMContext, phone: str
         if data.get('morning'):
             morning_booking_chat_ids.setdefault(data['date'], set()).add(user_chat_id)
             schedule_morning_finalization(data['date'])
+
+        record_booking_index(booking_code, user_chat_id, data['date'], booking_window, f"{actual_equipment} {equipment_note}".rstrip())
 
         notify_text = (
             "Нове бронювання!\n"
@@ -1774,51 +1842,65 @@ async def api_availability(request: web.Request) -> web.Response:
         return web.json_response({"error": "internal error"}, status=500, headers=headers)
 
 
+async def api_cancel_booking(request: web.Request) -> web.Response:
+    headers = _cors_headers()
+    try:
+        payload = await request.json()
+        user_id = str(payload.get("user_id", "")).strip()
+        code = str(payload.get("cancel_code", "")).strip()
+
+        if not user_id:
+            return web.json_response({"error": "missing user_id"}, status=400, headers=headers)
+        if not (code.isdigit() and len(code) == 5):
+            return web.json_response({"error": "invalid cancel_code"}, status=400, headers=headers)
+
+        booking_record = get_booking_record(code)
+        if not booking_record or str(booking_record.get("user_id", "")) != user_id:
+            return web.json_response({"error": "booking not found"}, status=404, headers=headers)
+
+        cleared_count, booking_name, equipment_names, booking_date, booking_time_window = find_and_clear_booking_by_code(code)
+        if cleared_count == 0:
+            return web.json_response({"error": "booking not found"}, status=404, headers=headers)
+
+        cancel_reminder_task(code)
+        remove_booking_index(code)
+
+        cancellation_dt = get_current_time().strftime("%d.%m.%Y %H:%M")
+        if STAFF_CHAT_ID is not None:
+            try:
+                await bot.send_message(
+                    chat_id=STAFF_CHAT_ID,
+                    text=(
+                        "Скасування бронювання! (Web API)\n"
+                        f"Код: {code}\n"
+                        f"Клієнт: {booking_name if booking_name else 'Невідомо'}\n"
+                        f"Дата бронювання: {booking_date if booking_date else 'Невідомо'}\n"
+                        f"Час бронювання: {booking_time_window if booking_time_window else 'Невідомо'}\n"
+                        f"Обладнання: {equipment_names if equipment_names else 'Невідомо'}\n"
+                        f"Очищено слотів: {cleared_count}\n"
+                        f"Скасовано: {cancellation_dt}"
+                    ),
+                )
+            except Exception as e:
+                print(f"[ERROR] api_cancel_booking notify failed: {e}")
+
+        return web.json_response({"ok": True, "code": code, "cleared": cleared_count}, headers=headers)
+
+    except Exception as e:
+        print(f"[ERROR] api_cancel_booking: {e}")
+        return web.json_response({"error": "internal error"}, status=500, headers=headers)
+
+
 async def api_mybookings(request: web.Request) -> web.Response:
     headers = _cors_headers()
     try:
         user_id = request.query.get("user_id", "")
         if not user_id:
             return web.json_response({"error": "missing user_id"}, status=400, headers=headers)
-        marker = f"UID:{user_id}"
-
-        results = {}  # (date, code) -> {rows:set, cols:set, is_morning:bool}
-        for ws in get_booking_worksheets_from_today():
-            date_str = ws.title
-            all_values = ws.get_all_values()
-            for r_idx, row in enumerate(all_values, start=1):
-                for c_idx, cell in enumerate(row, start=1):
-                    if marker in cell:
-                        code = None
-                        for line in cell.split("\n"):
-                            if line.startswith("ID:"):
-                                code = line[3:]
-                                break
-                        if not code:
-                            continue
-                        key = (date_str, code)
-                        entry = results.setdefault(key, {"rows": set(), "cols": set(), "is_morning": r_idx > len(TIME_SLOTS) + 1})
-                        entry["rows"].add(r_idx)
-                        entry["cols"].add(c_idx)
-
-        bookings = []
-        for (date_str, code), entry in results.items():
-            equipment_names = sorted({get_equipment_name_for_column(c) for c in entry["cols"]})
-            qty = len(entry["cols"])
-            equipment_label = f"{', '.join(equipment_names)} × {qty}" if qty > 1 else (equipment_names[0] if equipment_names else "Невідомо")
-
-            if entry["is_morning"]:
-                time_label = "Сплав на світанку"
-            else:
-                rows = sorted(entry["rows"])
-                start_idx = rows[0] - 2
-                end_idx = rows[-1] - 2
-                if 0 <= start_idx < len(TIME_SLOTS) and 0 <= end_idx < len(TIME_SLOTS):
-                    time_label = f"{TIME_SLOTS[start_idx].split('-')[0]}-{TIME_SLOTS[end_idx].split('-')[1]}"
-                else:
-                    time_label = "Невідомо"
-
-            bookings.append({"code": code, "date": date_str, "time": time_label, "equipment": equipment_label})
+        bookings = [
+            {"code": item["code"], "date": item["date"], "time": item["time"], "equipment": item["equipment"]}
+            for item in get_bookings_for_user(user_id)
+        ]
 
         return web.json_response(bookings, headers=headers)
 
@@ -1830,8 +1912,10 @@ async def api_mybookings(request: web.Request) -> web.Response:
 async def start_web_api():
     app = web.Application()
     app.router.add_get("/api/availability", api_availability)
+    app.router.add_post("/api/cancelbooking", api_cancel_booking)
     app.router.add_get("/api/mybookings", api_mybookings)
     app.router.add_route("OPTIONS", "/api/availability", api_options)
+    app.router.add_route("OPTIONS", "/api/cancelbooking", api_options)
     app.router.add_route("OPTIONS", "/api/mybookings", api_options)
     runner = web.AppRunner(app)
     await runner.setup()

@@ -96,7 +96,7 @@
         <div class="text-xl font-bold">Інформація</div>
       </div>
 
-      <a href="https://mandry-sup-menu.example.com" target="_blank"
+      <a href="https://mandry-sup.choiceqr.com/menu" target="_blank"
          class="block w-full bg-blue-600 text-white text-center font-semibold py-3.5 rounded-2xl mb-4">🍽️ Меню</a>
 
       <div class="flex flex-col gap-2" id="accordions"></div>
@@ -142,6 +142,9 @@ function switchTab(name){
     b.classList.toggle('text-blue-600', active);
     b.classList.toggle('text-gray-400', !active);
   });
+  if (name === 'bookings') {
+    renderBookings();
+  }
 }
 switchTab('book');
 
@@ -417,11 +420,34 @@ async function renderBookings(){
 }
 renderBookings();
 
-function cancelBooking(code, cardEl){
-  tg?.sendData(JSON.stringify({ type:'cancel', cancel_code: code }));
+async function cancelBooking(code, cardEl){
+  const button = cardEl.querySelector('.cancel-btn');
+  button.textContent = 'Скасовується…';
+  button.disabled = true;
   cardEl.style.opacity = '0.4';
-  cardEl.querySelector('.cancel-btn').textContent = 'Скасовується…';
-  cardEl.querySelector('.cancel-btn').disabled = true;
+
+  if (tg?.sendData) {
+    tg.sendData(JSON.stringify({ type:'cancel', cancel_code: code }));
+    return;
+  }
+
+  const userId = tg?.initDataUnsafe?.user?.id;
+  try {
+    const res = await fetch(`${API_BASE_URL}/cancelbooking`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, cancel_code: code }),
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result?.error || 'bad response');
+    await renderBookings();
+  } catch (e) {
+    console.error('cancelBooking failed:', e);
+    button.textContent = 'Скасувати бронювання';
+    button.disabled = false;
+    cardEl.style.opacity = '1';
+    alert('Не вдалося скасувати бронювання. Спробуйте ще раз.');
+  }
 }
 
 /* ================= ABOUT US ================= */
