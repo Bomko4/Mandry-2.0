@@ -142,7 +142,6 @@ function switchTab(name){
     b.classList.toggle('text-blue-600', active);
     b.classList.toggle('text-gray-400', !active);
   });
-  if (name === 'bookings') renderBookings();
 }
 switchTab('book');
 
@@ -423,7 +422,6 @@ function cancelBooking(code, cardEl){
   cardEl.style.opacity = '0.4';
   cardEl.querySelector('.cancel-btn').textContent = 'Скасовується…';
   cardEl.querySelector('.cancel-btn').disabled = true;
-  setTimeout(renderBookings, 1200);
 }
 
 /* ================= ABOUT US ================= */
