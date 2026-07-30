@@ -296,6 +296,20 @@ def is_phone_blacklisted(phone: str) -> bool:
     return False
 
 
+def extract_saved_phone(cell_value: str) -> str:
+    lines = [line.strip() for line in cell_value.split("\n") if line.strip()]
+    if len(lines) >= 3 and not lines[2].startswith("UID:"):
+        return lines[2]
+
+    for line in lines:
+        if line.startswith("ID:") or line.startswith("UID:"):
+            continue
+        if normalize_phone_number(line):
+            return line
+
+    return ""
+
+
 def get_equipment_name_for_column(col: int) -> str:
     """Map a 1-based sheet column to its equipment column name (col 1 = ВІКНО)."""
     idx = col - 2
@@ -1778,9 +1792,11 @@ async def api_mybookings(request: web.Request) -> web.Response:
     headers = _cors_headers()
     try:
         user_id = request.query.get("user_id", "")
-        if not user_id:
-            return web.json_response({"error": "missing user_id"}, status=400, headers=headers)
-        marker = f"UID:{user_id}"
+        phone = request.query.get("phone", "")
+        if not user_id and not phone:
+            return web.json_response({"error": "missing user_id or phone"}, status=400, headers=headers)
+        phone_normalized = normalize_phone_number(phone)
+        marker = f"UID:{user_id}" if user_id else ""
 
         results = {}  # (date, code) -> {rows:set, cols:set, is_morning:bool}
         for ws in get_booking_worksheets_from_today():
@@ -1788,18 +1804,31 @@ async def api_mybookings(request: web.Request) -> web.Response:
             all_values = ws.get_all_values()
             for r_idx, row in enumerate(all_values, start=1):
                 for c_idx, cell in enumerate(row, start=1):
-                    if marker in cell:
+                    if not isinstance(cell, str):
+                        continue
+
+                    matches_user_id = bool(marker) and marker in cell
+                    matches_phone = False
+                    if phone_normalized:
+                        saved_phone = extract_saved_phone(cell)
+                        matches_phone = normalize_phone_number(saved_phone) == phone_normalized
+
+                    if matches_user_id or matches_phone:
                         code = None
+                        saved_phone = ""
                         for line in cell.split("\n"):
                             if line.startswith("ID:"):
                                 code = line[3:]
                                 break
+                        saved_phone = extract_saved_phone(cell)
                         if not code:
                             continue
                         key = (date_str, code)
                         entry = results.setdefault(key, {"rows": set(), "cols": set(), "is_morning": r_idx > len(TIME_SLOTS) + 1})
                         entry["rows"].add(r_idx)
                         entry["cols"].add(c_idx)
+                        if saved_phone:
+                            entry["phone"] = saved_phone
 
         bookings = []
         for (date_str, code), entry in results.items():
@@ -1818,7 +1847,7 @@ async def api_mybookings(request: web.Request) -> web.Response:
                 else:
                     time_label = "Невідомо"
 
-            bookings.append({"code": code, "date": date_str, "time": time_label, "equipment": equipment_label})
+            bookings.append({"code": code, "date": date_str, "time": time_label, "equipment": equipment_label, "phone": entry.get("phone", "")})
 
         return web.json_response(bookings, headers=headers)
 
