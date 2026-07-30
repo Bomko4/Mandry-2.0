@@ -1826,13 +1826,38 @@ async def api_mybookings(request: web.Request) -> web.Response:
         print(f"[ERROR] api_mybookings: {e}")
         return web.json_response({"error": "internal error"}, status=500, headers=headers)
 
+async def api_days_status(request: web.Request) -> web.Response:
+    """Returns {date_str: is_closed} for a comma-separated list of dd.mm dates.
+    A day is 'closed' when every time-slot cell in its sheet is '*'.
+    Dates with no sheet yet are treated as open — this never creates sheets."""
+    headers = _cors_headers()
+    try:
+        dates_param = request.query.get("dates", "")
+        result = {}
+        for date_str in [d.strip() for d in dates_param.split(",") if d.strip()]:
+            try:
+                datetime.strptime(date_str, "%d.%m")
+            except ValueError:
+                continue
+            try:
+                ws = sh.worksheet(date_str)
+            except gspread.exceptions.WorksheetNotFound:
+                result[date_str] = False
+                continue
+            result[date_str] = is_weather_blocked_sheet(ws.get_all_values())
+        return web.json_response(result, headers=headers)
+    except Exception as e:
+        print(f"[ERROR] api_days_status: {e}")
+        return web.json_response({"error": "internal error"}, status=500, headers=headers)
 
 async def start_web_api():
     app = web.Application()
     app.router.add_get("/api/availability", api_availability)
     app.router.add_get("/api/mybookings", api_mybookings)
+    app.router.add_get("/api/days-status", api_days_status)
     app.router.add_route("OPTIONS", "/api/availability", api_options)
     app.router.add_route("OPTIONS", "/api/mybookings", api_options)
+    app.router.add_route("OPTIONS", "/api/days-status", api_options)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", WEBAPP_API_PORT)

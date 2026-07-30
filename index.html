@@ -40,15 +40,15 @@
       </section>
 
       <section id="step2" class="step hidden">
+        <h2 class="text-xl font-bold mt-2 mb-3">Оберіть час</h2>
+        <div id="timeGrid" class="grid grid-cols-2 gap-2"></div>
+      </section>
+
+      <section id="step3" class="step hidden">
         <h2 class="text-xl font-bold mt-2 mb-3">Сапи</h2>
         <div class="flex justify-center gap-3 overflow-x-auto noscroll pb-2 mb-6" id="supScroll"></div>
         <h2 class="text-xl font-bold mb-3">Каяки</h2>
         <div class="flex justify-center gap-3 overflow-x-auto noscroll pb-2 mb-6" id="kayakScroll"></div>
-      </section>
-
-      <section id="step3" class="step hidden">
-        <h2 class="text-xl font-bold mt-2 mb-3">Оберіть час</h2>
-        <div id="timeGrid" class="grid grid-cols-2 gap-2"></div>
       </section>
 
       <section id="step4" class="step hidden">
@@ -139,6 +139,7 @@ function switchTab(name){
     b.classList.toggle('text-blue-600', active);
     b.classList.toggle('text-gray-400', !active);
   });
+  if (name === 'bookings') renderBookings();
 }
 switchTab('book');
 
@@ -148,6 +149,7 @@ let step = 1;
 
 const dateScroll = document.getElementById('dateScroll');
 for (let i=0;i<28;i++){
+  
   const d = new Date(); d.setDate(d.getDate()+i);
   const isWeekend = d.getDay() === 0 || d.getDay() === 6;
   const isToday = i === 0;
@@ -160,11 +162,30 @@ for (let i=0;i<28;i++){
   const dayColor = isWeekend ? 'text-blue-600 font-bold' : 'text-gray-400';
   const numColor = isWeekend ? 'text-blue-600' : '';
   btn.innerHTML = `<div class="text-[11px] ${dayColor}">${DAYS[d.getDay()]}</div><div class="text-lg font-bold leading-tight ${numColor}">${d.getDate()}</div><div class="text-[11px] text-gray-400">${MONTHS[d.getMonth()]}</div>${isToday ? '<div class="text-[9px] text-blue-600 font-semibold mt-0.5">сьогодні</div>' : ''}`;
-  btn.onclick = () => { selectOne('.date-btn', btn); state.date = btn.dataset.val; state.time = null; checkStep1(); };
+  btn.onclick = () => { selectOne('.date-btn', btn); state.date = btn.dataset.val; state.time = null; state.equipment = null; checkStep1(); };
   dateScroll.appendChild(btn);
 }
+(async () => {
+  const dateStrs = Array.from(document.querySelectorAll('.date-btn')).map(b => b.dataset.val);
+  if (!API_BASE_URL || dateStrs.length === 0) return;
+  try {
+    const res = await fetch(`${API_BASE_URL}/days-status?dates=${encodeURIComponent(dateStrs.join(','))}`);
+    if (!res.ok) throw new Error('bad response');
+    const statusMap = await res.json();
+    document.querySelectorAll('.date-btn').forEach(btn => {
+      if (statusMap[btn.dataset.val]) {
+        btn.disabled = true;
+        btn.classList.add('opacity-30', 'cursor-not-allowed');
+        btn.onclick = null;
+        if (state.date === btn.dataset.val) { state.date = null; checkStep1(); }
+      }
+    });
+  } catch (e) {
+    console.error('fetchDaysStatus failed:', e);
+  }
+})();
 document.querySelectorAll('.dur-btn').forEach(btn=>{
-  btn.onclick = () => { selectOne('.dur-btn', btn); state.duration = btn.dataset.val; state.time = null; checkStep1(); };
+  btn.onclick = () => { selectOne('.dur-btn', btn); state.duration = btn.dataset.val; state.time = null; state.equipment = null; checkStep1(); };
 });
 function checkStep1(){ setMainEnabled(!!state.date && !!state.duration); }
 
@@ -176,43 +197,64 @@ const KAYAKS = [
   {id:'kayak_single', title:'Каяк одномісний', price1h:'450грн/год', price2h:'800грн/2 год', img:'🛶'},
   {id:'kayak_double', title:'Каяк двомісний', price1h:'700грн/год', price2h:'1300грн/2 год', img:'🛶'}
 ];
+const ALL_EQUIPMENT_IDS = ['sup_single','sup_double','kayak_single','kayak_double'];
 const supScroll = document.getElementById('supScroll');
-SUPS.forEach(item=>{
+const kayakScroll = document.getElementById('kayakScroll');
+
+// { equipmentId: { slotStart: maxQty } }, populated by renderTimeSlots() for the chosen date/duration
+let slotAvailability = {};
+
+function currentSlotStart(){
+  if (!state.time) return null;
+  return state.duration === 'morning' ? MORNING_WINDOW : state.time.split('-')[0];
+}
+
+function buildEquipmentCard(item, container){
+  const maxQty = slotAvailability[item.id]?.[currentSlotStart()] ?? 0;
+  const disabled = maxQty === 0;
+  const showQty = item.id.startsWith('sup_');
   const card = document.createElement('div');
-  card.className = 'eq-card flex-shrink-0 w-40 bg-white rounded-2xl shadow-sm overflow-hidden border-2 border-transparent';
+  card.className = 'eq-card flex-shrink-0 w-40 bg-white rounded-2xl shadow-sm overflow-hidden border-2 border-transparent'
+    + (disabled ? ' opacity-40' : ' cursor-pointer');
   card.innerHTML = `
     <div class="h-24 bg-gray-100 flex items-center justify-center text-4xl">${item.img}</div>
     <div class="p-3">
       <div class="font-semibold text-sm mb-1">${item.title}</div>
       <div class="text-xs text-gray-400 mb-2 price-line" data-price1h="${item.price1h}" data-price2h="${item.price2h}">${item.price1h}</div>
-      <div class="flex items-center justify-between bg-gray-50 rounded-xl px-1 py-1">
-        <button class="qty-minus w-7 h-7 rounded-lg bg-white shadow-sm font-bold text-blue-600">−</button>
-        <span class="qty-val text-sm font-semibold">1</span>
-        <button class="qty-plus w-7 h-7 rounded-lg bg-white shadow-sm font-bold text-blue-600">+</button>
-      </div>
+      ${disabled ? `<div class="text-[10px] text-red-500 text-center">Немає в наявності на цей час</div>` :
+        (showQty ? `<div class="flex items-center justify-between bg-gray-50 rounded-xl px-1 py-1">
+          <button class="qty-minus w-7 h-7 rounded-lg bg-white shadow-sm font-bold text-blue-600">−</button>
+          <span class="qty-val text-sm font-semibold">1</span>
+          <button class="qty-plus w-7 h-7 rounded-lg bg-white shadow-sm font-bold text-blue-600">+</button>
+        </div>` : '')}
     </div>`;
-  const qtyVal = card.querySelector('.qty-val');
-  let qty = 1;
-  const selectSup = () => { selectOne('.eq-card', card); state.equipment = item.id; state.quantity = qty; state.time = null; checkStep2(); };
-  card.querySelector('.qty-minus').onclick = e => { e.stopPropagation(); qty = Math.max(1, qty-1); qtyVal.textContent = qty; selectSup(); };
-  card.querySelector('.qty-plus').onclick = e => { e.stopPropagation(); qty = Math.min(10, qty+1); qtyVal.textContent = qty; selectSup(); };
-  card.onclick = selectSup;
-  supScroll.appendChild(card);
-});
-const kayakScroll = document.getElementById('kayakScroll');
-KAYAKS.forEach(item=>{
-  const card = document.createElement('div');
-  card.className = 'eq-card flex-shrink-0 w-40 bg-white rounded-2xl shadow-sm overflow-hidden border-2 border-transparent cursor-pointer';
-  card.innerHTML = `
-    <div class="h-24 bg-gray-100 flex items-center justify-center text-4xl">${item.img}</div>
-    <div class="p-3">
-      <div class="font-semibold text-sm mb-1">${item.title}</div>
-      <div class="text-xs text-gray-400 mb-1 price-line" data-price1h="${item.price1h}" data-price2h="${item.price2h}">${item.price1h}</div>
-    </div>`;
-  card.onclick = () => { selectOne('.eq-card', card); state.equipment = item.id; state.quantity = 1; state.time = null; checkStep2(); };
-  kayakScroll.appendChild(card);
-});
-function checkStep2(){ setMainEnabled(!!state.equipment); }
+  container.appendChild(card);
+  if (disabled) return;
+
+  const selectEquip = (qty) => { selectOne('.eq-card', card); state.equipment = item.id; state.quantity = qty; checkStep3(); };
+
+  if (showQty){
+    const qtyVal = card.querySelector('.qty-val');
+    const plusBtn = card.querySelector('.qty-plus');
+    let qty = 1;
+    const syncPlus = () => { plusBtn.disabled = qty >= maxQty; plusBtn.classList.toggle('opacity-30', qty >= maxQty); };
+    syncPlus();
+    card.querySelector('.qty-minus').onclick = e => { e.stopPropagation(); qty = Math.max(1, qty-1); qtyVal.textContent = qty; syncPlus(); selectEquip(qty); };
+    plusBtn.onclick = e => { e.stopPropagation(); qty = Math.min(maxQty, qty+1); qtyVal.textContent = qty; syncPlus(); selectEquip(qty); };
+    card.onclick = () => selectEquip(qty);
+  } else {
+    card.onclick = () => selectEquip(1);
+  }
+}
+
+function buildEquipmentCards(){
+  supScroll.innerHTML = '';
+  kayakScroll.innerHTML = '';
+  SUPS.forEach(item => buildEquipmentCard(item, supScroll));
+  KAYAKS.forEach(item => buildEquipmentCard(item, kayakScroll));
+  updateEquipmentPrices();
+}
+function checkStep3(){ setMainEnabled(!!state.equipment); }
 function updateEquipmentPrices(){
   const use2h = state.duration === '2';
   document.querySelectorAll('.price-line').forEach(el => {
@@ -247,63 +289,68 @@ async function fetchAvailability(date, equipment, duration){
 
 async function renderTimeSlots(){
   timeGrid.innerHTML = '<div class="col-span-2 text-center text-sm text-gray-400 py-4">Завантаження…</div>';
-  const availability = await fetchAvailability(state.date, state.equipment, state.duration);
+  slotAvailability = {};
+  const results = await Promise.all(
+    ALL_EQUIPMENT_IDS.map(id => fetchAvailability(state.date, id, state.duration).then(r => ({ id, r })))
+  );
   timeGrid.innerHTML = '';
 
   if (state.duration === 'morning'){
-    const closed = availability.closed || !availability.available || (availability.maxQty || 0) < state.quantity;
+    let closed = true;
+    results.forEach(({ id, r }) => {
+      slotAvailability[id] = { [MORNING_WINDOW]: r.closed ? 0 : (r.maxQty || 0) };
+      if (!r.closed) closed = false;
+    });
+    const anyAvailable = results.some(({ r }) => !r.closed && r.available);
+    const isSelectable = !closed && anyAvailable;
     const btn = document.createElement('button');
     btn.className = 'time-btn col-span-2 py-3 rounded-2xl border-2 border-transparent shadow-sm font-medium '
-      + (closed ? 'bg-gray-100 text-gray-300 cursor-not-allowed' : 'bg-white');
+      + (isSelectable ? 'bg-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed');
     btn.textContent = MORNING_WINDOW;
-    btn.disabled = closed;
-    if (!closed){
-      btn.onclick = () => { selectOne('.time-btn', btn); state.time = MORNING_WINDOW; setMainEnabled(true); };
+    btn.disabled = !isSelectable;
+    if (isSelectable){
+      btn.onclick = () => { selectOne('.time-btn', btn); state.time = MORNING_WINDOW; state.equipment = null; setMainEnabled(true); };
     }
     timeGrid.appendChild(btn);
-    if (!closed) return;
-    if (availability.maxQty > 0 && availability.maxQty < state.quantity){
+    if (!isSelectable){
       const note = document.createElement('div');
-      note.className = 'col-span-2 text-center text-xs text-red-500 mt-2';
-      note.textContent = `Доступно лише ${availability.maxQty} од. на цей час — зменшіть кількість на попередньому кроці.`;
+      note.className = 'col-span-2 text-center text-xs text-gray-400 mt-2';
+      note.textContent = 'На цю дату ранковий сплав недоступний.';
       timeGrid.appendChild(note);
     }
     return;
   }
 
-  if (availability.closed){
+  if (results.every(({ r }) => r.closed)){
     timeGrid.innerHTML = '<div class="col-span-2 text-center text-sm text-gray-400 py-4">На цю дату немає вільних місць</div>';
     return;
   }
 
   const dur = parseInt(state.duration || '1', 10);
-  let anyQuantityBlocked = false;
+  ALL_EQUIPMENT_IDS.forEach(id => slotAvailability[id] = {});
+  const startTimes = (results.find(({ r }) => !r.closed)?.r.slots || []).map(s => s.start);
 
-  (availability.slots || []).forEach(slotInfo => {
-    const start = slotInfo.start;
+  startTimes.forEach(start => {
     const end = addMinutesToTime(start, dur * 60);
     const label = `${start}–${end}`;
-    const enoughQty = (slotInfo.maxQty || 0) >= state.quantity;
-    const isSelectable = slotInfo.available && enoughQty;
-    if (slotInfo.available && !enoughQty) anyQuantityBlocked = true;
-
+    let maxQtyAny = 0;
+    results.forEach(({ id, r }) => {
+      const slot = r.closed ? null : (r.slots || []).find(s => s.start === start);
+      const qty = slot?.available ? (slot.maxQty || 0) : 0;
+      slotAvailability[id][start] = qty;
+      if (qty > maxQtyAny) maxQtyAny = qty;
+    });
+    const isSelectable = maxQtyAny > 0;
     const btn = document.createElement('button');
     btn.className = 'time-btn py-3 rounded-2xl border-2 border-transparent shadow-sm font-medium text-sm '
       + (isSelectable ? 'bg-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed');
     btn.textContent = label;
     btn.disabled = !isSelectable;
     if (isSelectable){
-      btn.onclick = () => { selectOne('.time-btn', btn); state.time = TIME_SLOTS.find(s => s.startsWith(start)); setMainEnabled(true); };
+      btn.onclick = () => { selectOne('.time-btn', btn); state.time = TIME_SLOTS.find(s => s.startsWith(start)); state.equipment = null; setMainEnabled(true); };
     }
     timeGrid.appendChild(btn);
   });
-
-  if (anyQuantityBlocked){
-    const note = document.createElement('div');
-    note.className = 'col-span-2 text-center text-xs text-red-500 mt-2';
-    note.textContent = `Деякі часові слоти сірі, бо на них немає ${state.quantity} вільних одиниць обладнання — зменшіть кількість на попередньому кроці.`;
-    timeGrid.appendChild(note);
-  }
 }
 
 const fullNameInput = document.getElementById('fullName');
@@ -338,9 +385,9 @@ function showStep(n){
   document.getElementById('progressBar').style.width = (n*25)+'%';
   document.getElementById('backBtn').style.visibility = n === 1 ? 'hidden' : 'visible';
   const mainBtn = document.getElementById('mainBtn');
-  if (n === 1) setMainEnabled(!!state.date && !!state.duration);
-  if (n === 2) { updateEquipmentPrices(); setMainEnabled(!!state.equipment); }
-  if (n === 3) { setMainEnabled(false); renderTimeSlots().then(() => setMainEnabled(!!state.time)); }
+ if (n === 1) setMainEnabled(!!state.date && !!state.duration);
+  if (n === 2) { setMainEnabled(false); renderTimeSlots().then(() => setMainEnabled(!!state.time)); }
+  if (n === 3) { setMainEnabled(false); buildEquipmentCards(); setMainEnabled(!!state.equipment); }
   if (n === 4) { renderSummary(); setMainEnabled(state.fullName.length > 2); mainBtn.textContent = 'Поділитись номером і забронювати'; }
   else mainBtn.textContent = 'Далі';
 }
@@ -362,19 +409,21 @@ const bookingsList = document.getElementById('bookingsList');
 async function fetchMyBookings(){
   const userId = tg?.initDataUnsafe?.user?.id;
   if (!userId || !API_BASE_URL) return [];
-  try {
-    const res = await fetch(`${API_BASE_URL}/mybookings?user_id=${userId}`);
-    if (!res.ok) throw new Error('bad response');
-    return await res.json();
-  } catch (e) {
-    console.error('fetchMyBookings failed:', e);
-    return [];
-  }
+  const res = await fetch(`${API_BASE_URL}/mybookings?user_id=${userId}`);
+  if (!res.ok) throw new Error('bad response');
+  return await res.json();
 }
 
 async function renderBookings(){
   bookingsList.innerHTML = `<div class="text-center text-gray-400 text-sm mt-10">Завантаження…</div>`;
-  const bookings = await fetchMyBookings();
+  let bookings;
+  try {
+    bookings = await fetchMyBookings();
+  } catch (e) {
+    console.error('fetchMyBookings failed:', e);
+    bookingsList.innerHTML = `<div class="text-center text-gray-400 text-sm mt-10">Не вдалося завантажити бронювання. Спробуйте ще раз.</div>`;
+    return;
+  }
 
   if (bookings.length === 0){
     bookingsList.innerHTML = `<div class="text-center text-gray-400 text-sm mt-10">У вас ще немає бронювань</div>`;
@@ -401,10 +450,11 @@ async function renderBookings(){
 renderBookings();
 
 function cancelBooking(code, cardEl){
-  tg?.sendData(JSON.stringify({ type:'cancel', cancel_code: code }));
   cardEl.style.opacity = '0.4';
   cardEl.querySelector('.cancel-btn').textContent = 'Скасовується…';
   cardEl.querySelector('.cancel-btn').disabled = true;
+  tg?.sendData(JSON.stringify({ type:'cancel', cancel_code: code }));
+  tg?.close();
 }
 
 /* ================= ABOUT US ================= */
