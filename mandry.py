@@ -456,6 +456,15 @@ def is_morning_confirmed(ws) -> bool:
     return count_morning_booked_slots(ws) >= 6
 
 
+def is_morning_booking_open(ws, date_str: str) -> bool:
+    """True while the morning flow can still accept bookings for this date."""
+    if is_morning_weather_blocked(ws):
+        return False
+    if is_morning_confirmed(ws):
+        return True
+    return get_current_time() < get_morning_booking_deadline(date_str)
+
+
 async def finalize_morning_booking_if_needed(date_str: str):
     ws = get_or_create_sheet(date_str)
     ensure_morning_table(ws)
@@ -963,6 +972,7 @@ async def process_web_app_data(message: types.Message, state: FSMContext):
     time_slot = payload.get("time")
     client_name = payload.get("full_name", "").strip()
     phone = payload.get("phone", "")
+    telegram_user_id = payload.get("user_id") or (message.from_user.id if message.from_user else message.chat.id)
 
     if not (selected_date and duration_raw and equipment and client_name):
         await message.answer("❌ Дані бронювання неповні. Спробуйте ще раз через міні-застосунок.")
@@ -984,7 +994,7 @@ async def process_web_app_data(message: types.Message, state: FSMContext):
         await message.answer("Прогнозується негода, тому ми зачинені на цю дату🏄‍♂️")
         return
 
-    data = {"date": selected_date, "equipment": equipment, "quantity": quantity}
+    data = {"date": selected_date, "equipment": equipment, "quantity": quantity, "telegram_user_id": telegram_user_id}
 
     if is_morning:
         ensure_morning_table(ws)
@@ -1150,12 +1160,15 @@ async def process_date(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer()
         return
 
+    morning_available = is_morning_booking_open(ws, selected_date)
+
     await state.update_data(date=selected_date)
 
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="1 година", callback_data="dur_1"))
     builder.row(types.InlineKeyboardButton(text="2 години", callback_data="dur_2"))
-    builder.row(types.InlineKeyboardButton(text="Ранковий сплав", callback_data="morning"))
+    if morning_available:
+        builder.row(types.InlineKeyboardButton(text="Ранковий сплав", callback_data="morning"))
 
     await callback.message.edit_text("Скільки часу хочете плавати?", reply_markup=builder.as_markup())
     await state.set_state(Booking.duration)
@@ -1184,22 +1197,13 @@ async def process_morning(callback: types.CallbackQuery, state: FSMContext):
             ws = get_or_create_sheet(selected_date)
             ensure_morning_table(ws)
 
-            if is_morning_weather_blocked(ws):
+            if not is_morning_booking_open(ws, selected_date):
                 await callback.message.edit_text("На цю дату не плануємо ранковий сплав")
                 await state.clear()
                 await callback.answer()
                 return
-
-            confirmed = is_morning_confirmed(ws)
         except Exception:
-            confirmed = False
-
-        past_deadline = get_current_time() >= get_morning_booking_deadline(selected_date)
-
-        if past_deadline and not confirmed:
-            await callback.message.edit_text(
-                "Ранковий сплав на цю дату недоступний: до 19:00 не набралося 6 учасників."
-            )
+            await callback.message.edit_text("На цю дату не плануємо ранковий сплав")
             await state.clear()
             await callback.answer()
             return
@@ -1458,7 +1462,7 @@ async def finalize_booking(message: types.Message, state: FSMContext, phone: str
         booking_code = generate_booking_code()
         actual_equipment = data.get('actual_equipment', data['equipment'])
         equipment_note = data.get('equipment_note', '')
-        user_chat_id = message.chat.id
+        user_chat_id = data.get("telegram_user_id") or (message.from_user.id if message.from_user else message.chat.id)
         quantity = int(data.get('quantity', 1))
     except Exception as e:
         print(f"[ERROR] finalize_booking - initialization failed: {e}")
@@ -1468,6 +1472,8 @@ async def finalize_booking(message: types.Message, state: FSMContext, phone: str
 
     # booking_value written to cells: ID, name, phone, telegram user id
     booking_lines = [f"ID:{booking_code}", client_name, phone, f"UID:{user_chat_id}"]
+    if message.from_user and message.from_user.id and str(message.from_user.id) != str(user_chat_id):
+        booking_lines.append(f"TGID:{message.from_user.id}")
     if equipment_note:
         booking_lines.append(equipment_note)
     booking_value = "\n".join(booking_lines)
@@ -1700,12 +1706,7 @@ async def api_availability(request: web.Request) -> web.Response:
                 return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
 
             ensure_morning_table(ws)
-            if is_morning_weather_blocked(ws):
-                return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
-
-            confirmed = is_morning_confirmed(ws)
-            past_deadline = current_time >= get_morning_booking_deadline(date_str)
-            if past_deadline and not confirmed:
+            if not is_morning_booking_open(ws, date_str):
                 return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
 
             fresh_vals = ws.get_all_values()
@@ -1780,7 +1781,7 @@ async def api_mybookings(request: web.Request) -> web.Response:
         user_id = request.query.get("user_id", "")
         if not user_id:
             return web.json_response({"error": "missing user_id"}, status=400, headers=headers)
-        marker = f"UID:{user_id}"
+        markers = {f"UID:{user_id}", f"TGID:{user_id}"}
 
         results = {}  # (date, code) -> {rows:set, cols:set, is_morning:bool}
         for ws in get_booking_worksheets_from_today():
@@ -1788,7 +1789,7 @@ async def api_mybookings(request: web.Request) -> web.Response:
             all_values = ws.get_all_values()
             for r_idx, row in enumerate(all_values, start=1):
                 for c_idx, cell in enumerate(row, start=1):
-                    if marker in cell:
+                    if any(marker in cell for marker in markers):
                         code = None
                         for line in cell.split("\n"):
                             if line.startswith("ID:"):

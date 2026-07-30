@@ -328,7 +328,10 @@ async function renderTimeSlots(){
 
   const dur = parseInt(state.duration || '1', 10);
   ALL_EQUIPMENT_IDS.forEach(id => slotAvailability[id] = {});
-  const startTimes = (results.find(({ r }) => !r.closed)?.r.slots || []).map(s => s.start);
+  const startOrder = TIME_SLOTS.map(slot => slot.split('-')[0]);
+  const startTimes = [...new Set(results.flatMap(({ r }) => r.closed ? [] : (r.slots || []).map(s => s.start)))].sort(
+    (a, b) => startOrder.indexOf(a) - startOrder.indexOf(b)
+  );
 
   startTimes.forEach(start => {
     const end = addMinutesToTime(start, dur * 60);
@@ -395,7 +398,16 @@ function nextStep(){ if (step === 4){ submitBooking(); return; } step++; showSte
 function prevStep(){ if (step === 1) return; step--; showStep(step); }
 
 function submitBooking(){
-  const payload = { type:'booking', date: state.date, duration: state.duration, equipment: state.equipment, quantity: state.quantity, time: state.time, full_name: state.fullName };
+  const payload = {
+    type: 'booking',
+    date: state.date,
+    duration: state.duration,
+    equipment: state.equipment,
+    quantity: state.quantity,
+    time: state.time,
+    full_name: state.fullName,
+    user_id: tg?.initDataUnsafe?.user?.id ?? null,
+  };
   const send = (phone) => { if (phone) payload.phone = phone; tg?.sendData(JSON.stringify(payload)); tg?.close(); };
   if (tg?.requestContact){
     tg.requestContact((shared, contact) => { send(shared ? contact?.responseUnsafe?.contact?.phone_number : null); });
