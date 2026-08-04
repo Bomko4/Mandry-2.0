@@ -1831,17 +1831,22 @@ async def api_availability(request: web.Request) -> web.Response:
         equipment = request.query.get("equipment", "")
         duration_param = request.query.get("duration", "1")
 
+        if equipment == "all":
+            try:
+                datetime.strptime(date_str, "%d.%m")
+            except ValueError:
+                return web.json_response({"error": "invalid date, expected dd.mm"}, status=400, headers=headers)
+
+            snapshot = _build_availability_snapshot(date_str, duration_param)
+            status = 400 if "error" in snapshot else 200
+            return web.json_response(snapshot, status=status, headers=headers)
+
         if equipment not in EQUIPMENT_COLUMN_GROUPS:
             return web.json_response({"error": "invalid equipment"}, status=400, headers=headers)
         try:
             datetime.strptime(date_str, "%d.%m")
         except ValueError:
             return web.json_response({"error": "invalid date, expected dd.mm"}, status=400, headers=headers)
-
-        if equipment == "all":
-            snapshot = _build_availability_snapshot(date_str, duration_param)
-            status = 400 if "error" in snapshot else 200
-            return web.json_response(snapshot, status=status, headers=headers)
 
         ws = get_or_create_sheet(date_str)
         all_values = ws.get_all_values()
