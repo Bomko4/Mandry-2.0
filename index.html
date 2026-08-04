@@ -77,6 +77,15 @@
       <div class="pt-4 pb-3">
         <div class="text-xl font-bold">Мої бронювання</div>
       </div>
+      <div id="bookingSearchBox" class="bg-white rounded-2xl p-4 shadow-sm mb-4">
+        <label class="block text-xs text-gray-400 mb-1" for="bookingPhoneInput">Номер телефону</label>
+        <input id="bookingPhoneInput" type="tel" inputmode="tel" autocomplete="tel" placeholder="+380XXXXXXXXX"
+          class="w-full rounded-xl border border-gray-200 px-3 py-3 text-base outline-none focus:border-blue-600">
+        <button id="bookingSearchBtn" class="w-full mt-3 bg-blue-600 text-white font-semibold py-3.5 rounded-2xl disabled:bg-gray-300">
+          Пошук
+        </button>
+        <div id="bookingSearchHint" class="text-xs text-gray-400 mt-2"></div>
+      </div>
       <div id="bookingsList" class="flex flex-col gap-3"></div>
     </div>
   </div>
@@ -236,11 +245,23 @@ function buildEquipmentCard(item, container){
   if (showQty){
     const qtyVal = card.querySelector('.qty-val');
     const plusBtn = card.querySelector('.qty-plus');
+    const minusBtn = card.querySelector('.qty-minus');
     let qty = 1;
-    const syncPlus = () => { plusBtn.disabled = qty >= maxQty; plusBtn.classList.toggle('opacity-30', qty >= maxQty); };
-    syncPlus();
-    card.querySelector('.qty-minus').onclick = e => { e.stopPropagation(); qty = Math.max(1, qty-1); qtyVal.textContent = qty; syncPlus(); selectEquip(qty); };
-    plusBtn.onclick = e => { e.stopPropagation(); qty = Math.min(maxQty, qty+1); qtyVal.textContent = qty; syncPlus(); selectEquip(qty); };
+    const syncControls = () => {
+      const atMin = qty <= 1;
+      const atMax = qty >= maxQty;
+      plusBtn.disabled = atMax;
+      plusBtn.classList.toggle('opacity-30', atMax);
+      plusBtn.classList.toggle('cursor-not-allowed', atMax);
+      plusBtn.classList.toggle('pointer-events-none', atMax);
+      minusBtn.disabled = atMin;
+      minusBtn.classList.toggle('opacity-30', atMin);
+      minusBtn.classList.toggle('cursor-not-allowed', atMin);
+      minusBtn.classList.toggle('pointer-events-none', atMin);
+    };
+    syncControls();
+    minusBtn.onclick = e => { e.stopPropagation(); qty = Math.max(1, qty-1); qtyVal.textContent = qty; syncControls(); selectEquip(qty); };
+    plusBtn.onclick = e => { e.stopPropagation(); qty = Math.min(maxQty, qty+1); qtyVal.textContent = qty; syncControls(); selectEquip(qty); };
     card.onclick = () => selectEquip(qty);
   } else {
     card.onclick = () => selectEquip(1);
@@ -328,7 +349,7 @@ async function renderTimeSlots(){
 
   const dur = parseInt(state.duration || '1', 10);
   ALL_EQUIPMENT_IDS.forEach(id => slotAvailability[id] = {});
-  const startTimes = (results.find(({ r }) => !r.closed)?.r.slots || []).map(s => s.start);
+  const startTimes = TIME_SLOTS.slice(0, TIME_SLOTS.length - dur + 1).map(slot => slot.split('-')[0]);
 
   startTimes.forEach(start => {
     const end = addMinutesToTime(start, dur * 60);
@@ -405,31 +426,78 @@ showStep(1);
 
 /* ================= MY BOOKINGS (dynamic) ================= */
 const bookingsList = document.getElementById('bookingsList');
+const bookingSearchBox = document.getElementById('bookingSearchBox');
+const bookingPhoneInput = document.getElementById('bookingPhoneInput');
+const bookingSearchBtn = document.getElementById('bookingSearchBtn');
+const bookingSearchHint = document.getElementById('bookingSearchHint');
+const BOOKING_PHONE_STORAGE_KEY = 'mandry.bookingPhone';
 
-async function fetchMyBookings(){
-  const userId = tg?.initDataUnsafe?.user?.id;
-  if (!userId || !API_BASE_URL) return [];
-  const res = await fetch(`${API_BASE_URL}/mybookings?user_id=${userId}`);
+function normalizePhoneInput(value){
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return '';
+  return `+${digits}`;
+}
+
+function getStoredBookingPhone(){
+  return localStorage.getItem(BOOKING_PHONE_STORAGE_KEY) || '';
+}
+
+function setStoredBookingPhone(phone){
+  if (phone) localStorage.setItem(BOOKING_PHONE_STORAGE_KEY, phone);
+}
+
+async function fetchMyBookings(phone){
+  if (!API_BASE_URL || !phone) return [];
+  const res = await fetch(`${API_BASE_URL}/mybookings?phone=${encodeURIComponent(phone)}`);
   if (!res.ok) throw new Error('bad response');
   return await res.json();
 }
 
-async function renderBookings(){
+function renderBookingsEmptyState(message){
+  bookingsList.innerHTML = `<div class="text-center text-gray-400 text-sm mt-10">${message}</div>`;
+}
+
+function renderBookingSearchState(){
+  const savedPhone = getStoredBookingPhone();
+  bookingPhoneInput.value = savedPhone;
+  bookingSearchHint.textContent = savedPhone ? `Пошук за номером ${savedPhone}` : 'Введіть номер телефону, який використовували під час бронювання.';
+  bookingSearchBtn.disabled = !normalizePhoneInput(bookingPhoneInput.value);
+  bookingSearchBox.classList.remove('hidden');
+}
+
+async function renderBookings(phone){
+  const normalizedPhone = normalizePhoneInput(phone || bookingPhoneInput.value || getStoredBookingPhone());
+  if (!normalizedPhone){
+    renderBookingSearchState();
+    renderBookingsEmptyState('Спочатку введіть номер телефону для пошуку бронювань.');
+    return;
+  }
+
+  bookingPhoneInput.value = normalizedPhone;
+  bookingSearchHint.textContent = `Шукаємо бронювання за ${normalizedPhone}…`;
+  bookingSearchBtn.disabled = true;
   bookingsList.innerHTML = `<div class="text-center text-gray-400 text-sm mt-10">Завантаження…</div>`;
   let bookings;
   try {
-    bookings = await fetchMyBookings();
+    bookings = await fetchMyBookings(normalizedPhone);
   } catch (e) {
     console.error('fetchMyBookings failed:', e);
+    bookingSearchHint.textContent = 'Не вдалося виконати пошук. Спробуйте ще раз.';
+    bookingSearchBtn.disabled = false;
     bookingsList.innerHTML = `<div class="text-center text-gray-400 text-sm mt-10">Не вдалося завантажити бронювання. Спробуйте ще раз.</div>`;
     return;
   }
 
   if (bookings.length === 0){
+    bookingSearchHint.textContent = `Бронювань за ${normalizedPhone} не знайдено.`;
+    bookingSearchBtn.disabled = false;
     bookingsList.innerHTML = `<div class="text-center text-gray-400 text-sm mt-10">У вас ще немає бронювань</div>`;
     return;
   }
 
+  setStoredBookingPhone(normalizedPhone);
+  bookingSearchHint.textContent = `Знайдено ${bookings.length} бронювань за ${normalizedPhone}.`;
+  bookingSearchBtn.disabled = false;
   bookingsList.innerHTML = '';
   bookings.forEach(b => {
     const card = document.createElement('div');
@@ -447,7 +515,29 @@ async function renderBookings(){
     bookingsList.appendChild(card);
   });
 }
-renderBookings();
+
+bookingSearchBtn.onclick = () => renderBookings(bookingPhoneInput.value);
+bookingPhoneInput.addEventListener('input', () => {
+  bookingSearchBtn.disabled = !normalizePhoneInput(bookingPhoneInput.value);
+});
+bookingPhoneInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    renderBookings(bookingPhoneInput.value);
+  }
+});
+
+function initBookingsTab(){
+  const savedPhone = getStoredBookingPhone();
+  if (savedPhone){
+    renderBookings(savedPhone);
+    return;
+  }
+  renderBookingSearchState();
+  renderBookingsEmptyState('Введіть номер телефону, щоб знайти свої бронювання.');
+}
+
+initBookingsTab();
 
 function cancelBooking(code, cardEl){
   cardEl.style.opacity = '0.4';

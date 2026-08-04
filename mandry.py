@@ -618,6 +618,61 @@ def resolve_equipment_booking(requested_equipment: str, all_values, row_idx: int
 
     return None
 
+
+def _equipment_target_columns_for_availability(requested_equipment: str) -> tuple[list[int], list[int]]:
+    if requested_equipment == "sup_single":
+        return (
+            get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS["sup_single"]),
+            get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS["sup_double"]),
+        )
+    if requested_equipment == "sup_double":
+        return (
+            get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS["sup_double"]),
+            get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS["sup_single"]),
+        )
+    return get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS[requested_equipment]), []
+
+
+def _free_columns_for_duration(all_values, row_idx: int, duration: int, target_cols: list[int]) -> list[int]:
+    return [col for col in target_cols if _col_status(all_values, row_idx, duration, col) == "free"]
+
+
+def _available_quantity_for_slot(all_values, row_idx: int, duration: int, requested_equipment: str) -> int:
+    primary_cols, fallback_cols = _equipment_target_columns_for_availability(requested_equipment)
+    free_primary = _free_columns_for_duration(all_values, row_idx, duration, primary_cols)
+
+    if requested_equipment.startswith("sup_"):
+        free_fallback = _free_columns_for_duration(all_values, row_idx, duration, fallback_cols)
+        return min(10, len(free_primary) + len(free_fallback))
+
+    return len(free_primary)
+
+
+def _morning_table_row_indexes(all_values) -> tuple[int | None, int | None]:
+    header_row_idx = None
+    for r_idx, row in enumerate(all_values):
+        if row and isinstance(row[0], str) and row[0].strip().lower().startswith("ранков"):
+            header_row_idx = r_idx
+            break
+
+    if header_row_idx is None:
+        return None, None
+
+    data_row_idx = header_row_idx + 1
+    if data_row_idx >= len(all_values):
+        return header_row_idx, None
+
+    return header_row_idx, data_row_idx
+
+
+def _morning_available_quantity(all_values, requested_equipment: str) -> int:
+    header_row_idx, data_row_idx = _morning_table_row_indexes(all_values)
+    if header_row_idx is None or data_row_idx is None:
+        return 0
+
+    write_row = data_row_idx + 1
+    return _available_quantity_for_slot(all_values, write_row, 1, requested_equipment)
+
 def _get_cell(all_values, row_idx: int, col: int) -> str:
     """Return stripped cell value (1-based row_idx, 1-based col)."""
     row = all_values[row_idx - 1] if row_idx - 1 < len(all_values) else []
@@ -1714,6 +1769,7 @@ async def api_availability(request: web.Request) -> web.Response:
                 return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
 
             ensure_morning_table(ws)
+            refreshed_values = ws.get_all_values()
             if is_morning_weather_blocked(ws):
                 return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
 
@@ -1722,21 +1778,11 @@ async def api_availability(request: web.Request) -> web.Response:
             if past_deadline and not confirmed:
                 return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
 
-            fresh_vals = ws.get_all_values()
-            header_row_idx = None
-            for r_idx, row in enumerate(fresh_vals):
-                if row and isinstance(row[0], str) and row[0].strip().lower().startswith("ранков"):
-                    header_row_idx = r_idx
-                    break
-            if header_row_idx is None:
+            header_row_idx, data_row_idx = _morning_table_row_indexes(refreshed_values)
+            if header_row_idx is None or data_row_idx is None:
                 return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
 
-            write_row = header_row_idx + 2
-            if equipment.startswith("sup_"):
-                max_qty = _sup_max_qty(fresh_vals, write_row, 1, equipment)
-            else:
-                target_cols = get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS[equipment])
-                max_qty = len(find_free_columns_for_duration(fresh_vals, write_row, 1, target_cols, 999))
+            max_qty = _morning_available_quantity(refreshed_values, equipment)
 
             return web.json_response({"closed": False, "available": max_qty > 0, "maxQty": max_qty}, headers=headers)
 
@@ -1747,9 +1793,9 @@ async def api_availability(request: web.Request) -> web.Response:
         if is_weather_blocked_sheet(all_values):
             return web.json_response({"closed": True, "slots": []}, headers=headers)
 
-        target_cols = get_target_columns_for_names(EQUIPMENT_COLUMN_GROUPS[equipment])
         max_start_index = len(TIME_SLOTS) - duration
         slots = []
+        target_cols, _ = _equipment_target_columns_for_availability(equipment)
 
         for start_index in range(max_start_index + 1):
             start_time_str = TIME_SLOTS[start_index].split('-')[0]
@@ -1769,15 +1815,10 @@ async def api_availability(request: web.Request) -> web.Response:
                 slots.append({"start": start_time_str, "available": False, "maxQty": 0})
                 continue
 
-            booking_resolution = resolve_equipment_booking(equipment, all_values, row_idx, duration)
-            if not booking_resolution:
+            max_qty = _available_quantity_for_slot(all_values, row_idx, duration, equipment)
+            if max_qty <= 0:
                 slots.append({"start": start_time_str, "available": False, "maxQty": 0})
                 continue
-
-            if equipment.startswith("sup_"):
-                max_qty = _sup_max_qty(all_values, row_idx, duration, equipment)
-            else:
-                max_qty = 1
 
             slots.append({"start": start_time_str, "available": max_qty > 0, "maxQty": max_qty})
 
