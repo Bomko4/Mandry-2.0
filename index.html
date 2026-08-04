@@ -464,8 +464,11 @@ async function shareBookingContact(){
 }
 
 async function fetchMyBookings(phone){
-  if (!API_BASE_URL || !phone) return [];
-  const res = await fetch(`${API_BASE_URL}/mybookings?phone=${encodeURIComponent(phone)}`);
+  if (!API_BASE_URL || (!phone && !tg?.initDataUnsafe?.user?.id)) return [];
+  const params = new URLSearchParams();
+  if (phone) params.set('phone', phone);
+  if (tg?.initDataUnsafe?.user?.id) params.set('user_id', String(tg.initDataUnsafe.user.id));
+  const res = await fetch(`${API_BASE_URL}/mybookings?${params.toString()}`);
   if (!res.ok) throw new Error('bad response');
   return await res.json();
 }
@@ -480,13 +483,15 @@ function renderBookingSearchState(){
 
 async function renderBookings(phone){
   const normalizedPhone = normalizePhoneInput(phone);
-  if (!normalizedPhone){
+  if (!normalizedPhone && !tg?.initDataUnsafe?.user?.id){
     renderBookingSearchState();
-    renderBookingsEmptyState('Спершу поділіться номером телефону.');
+    renderBookingsEmptyState('Спершу поділіться номером телефону або відкрийте Mini App у Telegram.');
     return;
   }
 
-  bookingSearchHint.textContent = `Шукаємо бронювання за ${normalizedPhone}…`;
+  bookingSearchHint.textContent = normalizedPhone
+    ? `Шукаємо бронювання за ${normalizedPhone}…`
+    : 'Шукаємо бронювання за профілем Telegram…';
   bookingsList.innerHTML = `<div class="text-center text-gray-400 text-sm mt-10">Завантаження…</div>`;
   let bookings;
   try {

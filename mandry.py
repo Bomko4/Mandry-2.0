@@ -1932,35 +1932,39 @@ async def api_mybookings(request: web.Request) -> web.Response:
 
         results = {}  # (date, code) -> {rows:set, cols:set, is_morning:bool}
         for ws in get_booking_worksheets_from_today():
-            date_str = ws.title
-            all_values = ws.get_all_values()
-            for r_idx, row in enumerate(all_values, start=1):
-                for c_idx, cell in enumerate(row, start=1):
-                    if not isinstance(cell, str):
-                        continue
-
-                    matches_user_id = bool(marker) and marker in cell
-                    matches_phone = False
-                    if phone_normalized:
-                        saved_phone = extract_saved_phone(cell)
-                        matches_phone = normalize_phone_number(saved_phone) == phone_normalized
-
-                    if matches_user_id or matches_phone:
-                        code = None
-                        saved_phone = ""
-                        for line in cell.split("\n"):
-                            if line.startswith("ID:"):
-                                code = line[3:]
-                                break
-                        saved_phone = extract_saved_phone(cell)
-                        if not code:
+            try:
+                date_str = ws.title
+                all_values = ws.get_all_values()
+                for r_idx, row in enumerate(all_values, start=1):
+                    for c_idx, cell in enumerate(row, start=1):
+                        if not isinstance(cell, str):
                             continue
-                        key = (date_str, code)
-                        entry = results.setdefault(key, {"rows": set(), "cols": set(), "is_morning": r_idx > len(TIME_SLOTS) + 1})
-                        entry["rows"].add(r_idx)
-                        entry["cols"].add(c_idx)
-                        if saved_phone:
-                            entry["phone"] = saved_phone
+
+                        matches_user_id = bool(marker) and marker in cell
+                        matches_phone = False
+                        if phone_normalized:
+                            saved_phone = extract_saved_phone(cell)
+                            matches_phone = normalize_phone_number(saved_phone) == phone_normalized
+
+                        if matches_user_id or matches_phone:
+                            code = None
+                            saved_phone = ""
+                            for line in cell.split("\n"):
+                                if line.startswith("ID:"):
+                                    code = line[3:].strip()
+                                    break
+                            saved_phone = extract_saved_phone(cell)
+                            if not code:
+                                continue
+                            key = (date_str, code)
+                            entry = results.setdefault(key, {"rows": set(), "cols": set(), "is_morning": r_idx > len(TIME_SLOTS) + 1})
+                            entry["rows"].add(r_idx)
+                            entry["cols"].add(c_idx)
+                            if saved_phone:
+                                entry["phone"] = saved_phone
+            except Exception as sheet_err:
+                print(f"[WARNING] api_mybookings skipped sheet {ws.title}: {sheet_err}")
+                continue
 
         bookings = []
         for (date_str, code), entry in results.items():
