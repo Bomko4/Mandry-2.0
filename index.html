@@ -78,7 +78,11 @@
         <div class="text-xl font-bold">Мої бронювання</div>
       </div>
       <div id="bookingSearchBox" class="bg-white rounded-2xl p-4 shadow-sm mb-4">
-        <label class="block text-xs text-gray-400 mb-1" for="bookingPhoneInput">Номер телефону</label>
+        <button id="bookingShareBtn" class="w-full bg-blue-600 text-white font-semibold py-3.5 rounded-2xl">
+          Поділитися номером
+        </button>
+        <div class="text-center text-xs text-gray-400 mt-2">або введіть номер вручну</div>
+        <label class="block text-xs text-gray-400 mb-1 mt-3" for="bookingPhoneInput">Номер телефону</label>
         <input id="bookingPhoneInput" type="tel" inputmode="tel" autocomplete="tel" placeholder="+380XXXXXXXXX"
           class="w-full rounded-xl border border-gray-200 px-3 py-3 text-base outline-none focus:border-blue-600">
         <button id="bookingSearchBtn" class="w-full mt-3 bg-blue-600 text-white font-semibold py-3.5 rounded-2xl disabled:bg-gray-300">
@@ -427,6 +431,7 @@ showStep(1);
 /* ================= MY BOOKINGS (dynamic) ================= */
 const bookingsList = document.getElementById('bookingsList');
 const bookingSearchBox = document.getElementById('bookingSearchBox');
+const bookingShareBtn = document.getElementById('bookingShareBtn');
 const bookingPhoneInput = document.getElementById('bookingPhoneInput');
 const bookingSearchBtn = document.getElementById('bookingSearchBtn');
 const bookingSearchHint = document.getElementById('bookingSearchHint');
@@ -444,6 +449,42 @@ function getStoredBookingPhone(){
 
 function setStoredBookingPhone(phone){
   if (phone) localStorage.setItem(BOOKING_PHONE_STORAGE_KEY, phone);
+}
+
+async function shareBookingContact(){
+  if (!tg?.requestContact){
+    bookingSearchHint.textContent = 'Контактний доступ недоступний. Введіть номер вручну.';
+    bookingPhoneInput.focus();
+    return;
+  }
+
+  bookingSearchBtn.disabled = true;
+  bookingSearchHint.textContent = 'Запитуємо контакт…';
+
+  try {
+    const result = await new Promise((resolve) => {
+      tg.requestContact((shared, contact) => {
+        resolve({
+          shared,
+          phone: shared ? contact?.responseUnsafe?.contact?.phone_number : null,
+        });
+      });
+    });
+
+    if (!result.shared || !result.phone){
+      bookingSearchHint.textContent = 'Контакт не було надано.';
+      bookingSearchBtn.disabled = !normalizePhoneInput(bookingPhoneInput.value);
+      return;
+    }
+
+    const normalizedPhone = normalizePhoneInput(result.phone);
+    bookingPhoneInput.value = normalizedPhone;
+    await renderBookings(normalizedPhone);
+  } catch (error) {
+    console.error('shareBookingContact failed:', error);
+    bookingSearchHint.textContent = 'Не вдалося отримати контакт.';
+    bookingSearchBtn.disabled = !normalizePhoneInput(bookingPhoneInput.value);
+  }
 }
 
 async function fetchMyBookings(phone){
@@ -517,6 +558,7 @@ async function renderBookings(phone){
 }
 
 bookingSearchBtn.onclick = () => renderBookings(bookingPhoneInput.value);
+bookingShareBtn.onclick = () => shareBookingContact();
 bookingPhoneInput.addEventListener('input', () => {
   bookingSearchBtn.disabled = !normalizePhoneInput(bookingPhoneInput.value);
 });
