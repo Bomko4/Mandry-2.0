@@ -281,6 +281,9 @@ function updateEquipmentPrices(){
 }
 
 const timeGrid = document.getElementById('timeGrid');
+let timeSlotsRequestSeq = 0;
+const availabilityCache = new Map();
+const AVAILABILITY_CACHE_TTL_MS = 8000;
 
 function addMinutesToTime(hhmm, minutesToAdd){
   const [h, m] = hhmm.split(':').map(Number);
@@ -295,10 +298,19 @@ async function fetchAvailability(date, duration){
     console.warn('API_BASE_URL is not set — availability cannot be checked, all slots will show as unavailable.');
     return duration === 'morning' ? { closed: true, available: false, maxQty: 0 } : { closed: true, slots: [] };
   }
+
+  const cacheKey = `${date}|${duration}`;
+  const cached = availabilityCache.get(cacheKey);
+  if (cached && (Date.now() - cached.at) < AVAILABILITY_CACHE_TTL_MS){
+    return cached.data;
+  }
+
   try {
     const res = await fetch(`${API_BASE_URL}/availability?date=${encodeURIComponent(date)}&equipment=all&duration=${encodeURIComponent(duration)}`);
     if (!res.ok) throw new Error('bad response');
-    return await res.json();
+    const data = await res.json();
+    availabilityCache.set(cacheKey, { at: Date.now(), data });
+    return data;
   } catch (e) {
     console.error('fetchAvailability failed:', e);
     return duration === 'morning' ? { closed: true, available: false, maxQty: 0 } : { closed: true, slots: [] };
@@ -306,9 +318,11 @@ async function fetchAvailability(date, duration){
 }
 
 async function renderTimeSlots(){
+  const requestSeq = ++timeSlotsRequestSeq;
   timeGrid.innerHTML = '<div class="col-span-2 text-center text-sm text-gray-400 py-4">Завантаження…</div>';
   slotAvailability = {};
   const summary = await fetchAvailability(state.date, state.duration);
+  if (requestSeq !== timeSlotsRequestSeq) return;
   timeGrid.innerHTML = '';
 
   if (state.duration === 'morning'){
