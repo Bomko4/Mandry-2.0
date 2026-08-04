@@ -1520,7 +1520,7 @@ async def process_quantity(callback: types.CallbackQuery, state: FSMContext):
         all_vals = ensure_morning_table(ws)
 
         header_row_idx = None
-        for r_idx, row in enumerate(all_values):
+        for r_idx, row in enumerate(all_vals):
             if row and len(row) > 0 and isinstance(row[0], str) and row[0].strip().lower().startswith("ранков"):
                 header_row_idx = r_idx
                 break

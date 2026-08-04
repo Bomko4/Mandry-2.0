@@ -282,8 +282,6 @@ function updateEquipmentPrices(){
 
 const timeGrid = document.getElementById('timeGrid');
 let timeSlotsRequestSeq = 0;
-const availabilityCache = new Map();
-const AVAILABILITY_CACHE_TTL_MS = 8000;
 
 function addMinutesToTime(hhmm, minutesToAdd){
   const [h, m] = hhmm.split(':').map(Number);
@@ -299,18 +297,10 @@ async function fetchAvailability(date, duration){
     return duration === 'morning' ? { closed: true, available: false, maxQty: 0 } : { closed: true, slots: [] };
   }
 
-  const cacheKey = `${date}|${duration}`;
-  const cached = availabilityCache.get(cacheKey);
-  if (cached && (Date.now() - cached.at) < AVAILABILITY_CACHE_TTL_MS){
-    return cached.data;
-  }
-
   try {
-    const res = await fetch(`${API_BASE_URL}/availability?date=${encodeURIComponent(date)}&equipment=all&duration=${encodeURIComponent(duration)}`);
+    const res = await fetch(`${API_BASE_URL}/availability?date=${encodeURIComponent(date)}&equipment=all&duration=${encodeURIComponent(duration)}&_=${Date.now()}`);
     if (!res.ok) throw new Error('bad response');
-    const data = await res.json();
-    availabilityCache.set(cacheKey, { at: Date.now(), data });
-    return data;
+    return await res.json();
   } catch (e) {
     console.error('fetchAvailability failed:', e);
     return duration === 'morning' ? { closed: true, available: false, maxQty: 0 } : { closed: true, slots: [] };
