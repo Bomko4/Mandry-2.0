@@ -307,12 +307,89 @@ async function fetchAvailability(date, duration){
   }
 }
 
+async function fetchDayClosed(date){
+  if (!API_BASE_URL) return false;
+  try {
+    const res = await fetch(`${API_BASE_URL}/days-status?dates=${encodeURIComponent(date)}&_=${Date.now()}`);
+    if (!res.ok) throw new Error('bad response');
+    const data = await res.json();
+    return !!data[date];
+  } catch (error) {
+    console.error('fetchDayClosed failed:', error);
+    return false;
+  }
+}
+
+async function fetchDetailedAvailability(date, duration){
+  const result = { closed: true, slots: [] };
+  if (!API_BASE_URL) return result;
+
+  const responses = await Promise.all(
+    ALL_EQUIPMENT_IDS.map(async (id) => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/availability?date=${encodeURIComponent(date)}&equipment=${encodeURIComponent(id)}&duration=${encodeURIComponent(duration)}&_=${Date.now()}`);
+        if (!res.ok) throw new Error('bad response');
+        return { id, data: await res.json() };
+      } catch (error) {
+        console.error('fetchDetailedAvailability failed for', id, error);
+        return { id, data: duration === 'morning' ? { closed: true, available: false, maxQty: 0 } : { closed: true, slots: [] } };
+      }
+    })
+  );
+
+  if (duration === 'morning'){
+    const availableByEquipment = {};
+    let maxQty = 0;
+    responses.forEach(({ id, data }) => {
+      const qty = data.closed ? 0 : (data.maxQty || 0);
+      availableByEquipment[id] = qty;
+      if (qty > maxQty) maxQty = qty;
+    });
+    return {
+      closed: false,
+      morning: true,
+      available: maxQty > 0,
+      maxQty,
+      availableByEquipment,
+    };
+  }
+
+  const slotsMap = new Map();
+  responses.forEach(({ id, data }) => {
+    const slotList = data.closed ? [] : (data.slots || []);
+    slotList.forEach(slot => {
+      const current = slotsMap.get(slot.start) || { start: slot.start, availableByEquipment: {} };
+      current.availableByEquipment[id] = slot.available ? (slot.maxQty || 0) : 0;
+      slotsMap.set(slot.start, current);
+    });
+  });
+
+  const slots = Array.from(slotsMap.values()).map(slot => {
+    const maxQty = Math.max(0, ...Object.values(slot.availableByEquipment || {}));
+    return { ...slot, available: maxQty > 0, maxQty };
+  }).sort((a, b) => a.start.localeCompare(b.start));
+
+  return { closed: false, slots };
+}
+
 async function renderTimeSlots(){
   const requestSeq = ++timeSlotsRequestSeq;
   timeGrid.innerHTML = '<div class="col-span-2 text-center text-sm text-gray-400 py-4">Завантаження…</div>';
   slotAvailability = {};
-  const summary = await fetchAvailability(state.date, state.duration);
+  let summary = await fetchAvailability(state.date, state.duration);
   if (requestSeq !== timeSlotsRequestSeq) return;
+
+  const dayClosed = await fetchDayClosed(state.date);
+  if (requestSeq !== timeSlotsRequestSeq) return;
+
+  const summaryLooksBad = !summary || summary.error || (!summary.closed && !summary.slots);
+  const summaryEmptyButDayOpen = !summary?.closed && Array.isArray(summary?.slots) && summary.slots.length === 0 && !dayClosed;
+  const summaryClosedButDayOpen = !!summary?.closed && !dayClosed;
+  if (!dayClosed && (summaryLooksBad || summaryEmptyButDayOpen || summaryClosedButDayOpen)){
+    summary = await fetchDetailedAvailability(state.date, state.duration);
+    if (requestSeq !== timeSlotsRequestSeq) return;
+  }
+
   timeGrid.innerHTML = '';
 
   if (state.duration === 'morning'){
