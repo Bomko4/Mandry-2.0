@@ -116,6 +116,13 @@ def get_sheet_lock(date_str: str) -> asyncio.Lock:
         sheet_locks[date_str] = lock
     return lock
 
+
+# Serializes booking-code generation so two near-simultaneous bookings can never be
+# assigned the same 5-digit code (generate_booking_code() reads existing codes then
+# picks one; without this lock two concurrent finalize_booking() calls could both
+# read the same "existing" set and pick the same free code).
+booking_code_lock = asyncio.Lock()
+
 class Booking(StatesGroup):
     date = State()
     duration = State()
@@ -1605,7 +1612,8 @@ async def finalize_booking(message: types.Message, state: FSMContext, phone: str
 
         ws = get_or_create_sheet(data['date'])
         duration = int(data.get('duration', 1))
-        booking_code = generate_booking_code()
+        async with booking_code_lock:
+            booking_code = generate_booking_code()
         actual_equipment = data.get('actual_equipment', data['equipment'])
         equipment_note = data.get('equipment_note', '')
         user_chat_id = message.chat.id
@@ -1805,13 +1813,37 @@ WEBAPP_API_PORT = int(os.getenv("WEBAPP_API_PORT", "8081"))
 def _cors_headers():
     return {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type",
+        # Availability/date/booking data changes constantly and must never be served
+        # stale from a browser/WebView cache or an intermediate proxy — this was
+        # missing before, which is a major cause of "old"/stale-looking data in the
+        # mini app (Telegram's embedded WebView can cache GET JSON responses that
+        # don't explicitly forbid it).
+        "Cache-Control": "no-store, no-cache, must-revalidate",
+        "Pragma": "no-cache",
     }
 
 
 async def api_options(request: web.Request) -> web.Response:
     return web.Response(headers=_cors_headers())
+
+
+async def api_server_time(request: web.Request) -> web.Response:
+    """Returns the backend's canonical current date/time (Europe/Kyiv by default).
+
+    The mini app previously built its date picker from the *visitor's device clock*,
+    which can silently disagree with the backend's clock/timezone (wrong phone
+    timezone, clock drift, etc.) and make already-past dates look bookable or
+    valid dates look closed. The frontend now anchors its date list to this
+    endpoint instead of trusting the device clock.
+    """
+    headers = _cors_headers()
+    current_time = get_current_time()
+    return web.json_response(
+        {"today": current_time.strftime("%d.%m"), "now": current_time.strftime("%H:%M")},
+        headers=headers,
+    )
 
 
 def _sup_max_qty(all_values, row_idx: int, duration: int, requested_equipment: str) -> int:
@@ -2020,9 +2052,11 @@ async def start_web_api():
     app.router.add_get("/api/availability", api_availability)
     app.router.add_get("/api/mybookings", api_mybookings)
     app.router.add_get("/api/days-status", api_days_status)
+    app.router.add_get("/api/server-time", api_server_time)
     app.router.add_route("OPTIONS", "/api/availability", api_options)
     app.router.add_route("OPTIONS", "/api/mybookings", api_options)
     app.router.add_route("OPTIONS", "/api/days-status", api_options)
+    app.router.add_route("OPTIONS", "/api/server-time", api_options)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", WEBAPP_API_PORT)

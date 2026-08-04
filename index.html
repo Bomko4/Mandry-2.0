@@ -154,28 +154,59 @@ let state = { date:null, duration:null, equipment:null, quantity:1, time:null, f
 let step = 1;
 
 const dateScroll = document.getElementById('dateScroll');
-for (let i=0;i<28;i++){
-  
-  const d = new Date(); d.setDate(d.getDate()+i);
-  const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-  const isToday = i === 0;
-  const btn = document.createElement('button');
-  btn.className = 'date-btn flex-shrink-0 w-16 py-2.5 rounded-2xl bg-white border-2 shadow-sm text-center '
-    + (isToday ? 'border-blue-600' : 'border-transparent');
-  const dd = String(d.getDate()).padStart(2,'0');
-  const mm = String(d.getMonth()+1).padStart(2,'0');
-  btn.dataset.val = `${dd}.${mm}`;
-  const dayColor = isWeekend ? 'text-blue-600 font-bold' : 'text-gray-400';
-  const numColor = isWeekend ? 'text-blue-600' : '';
-  btn.innerHTML = `<div class="text-[11px] ${dayColor}">${DAYS[d.getDay()]}</div><div class="text-lg font-bold leading-tight ${numColor}">${d.getDate()}</div><div class="text-[11px] text-gray-400">${MONTHS[d.getMonth()]}</div>${isToday ? '<div class="text-[9px] text-blue-600 font-semibold mt-0.5">сьогодні</div>' : ''}`;
-  btn.onclick = () => { selectOne('.date-btn', btn); state.date = btn.dataset.val; state.time = null; state.equipment = null; checkStep1(); };
-  dateScroll.appendChild(btn);
+
+// The date list used to be built from the visitor's device clock. If a phone's
+// timezone/clock disagrees with the server's (Europe/Kyiv), dates could look
+// bookable when the server considers them already past, or vice versa. We now
+// ask the backend what "today" is and anchor everything to that, falling back
+// to the device clock only if the server can't be reached.
+async function getServerToday(){
+  if (API_BASE_URL){
+    try {
+      const res = await fetch(`${API_BASE_URL}/server-time?_=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok){
+        const data = await res.json();
+        const [dd, mm] = String(data.today || '').split('.').map(Number);
+        if (dd && mm){
+          const now = new Date();
+          let base = new Date(now.getFullYear(), mm - 1, dd);
+          // Handle a Dec/Jan boundary the same way the backend does.
+          if (base - now > 300 * 24 * 60 * 60 * 1000) base.setFullYear(base.getFullYear() - 1);
+          if (now - base > 300 * 24 * 60 * 60 * 1000) base.setFullYear(base.getFullYear() + 1);
+          return base;
+        }
+      }
+    } catch (e) {
+      console.error('getServerToday failed, falling back to device clock:', e);
+    }
+  }
+  return new Date();
 }
-(async () => {
+
+async function initDateScroll(){
+  const today = await getServerToday();
+  dateScroll.innerHTML = '';
+  for (let i=0;i<28;i++){
+    const d = new Date(today); d.setDate(d.getDate()+i);
+    const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+    const isToday = i === 0;
+    const btn = document.createElement('button');
+    btn.className = 'date-btn flex-shrink-0 w-16 py-2.5 rounded-2xl bg-white border-2 shadow-sm text-center '
+      + (isToday ? 'border-blue-600' : 'border-transparent');
+    const dd = String(d.getDate()).padStart(2,'0');
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    btn.dataset.val = `${dd}.${mm}`;
+    const dayColor = isWeekend ? 'text-blue-600 font-bold' : 'text-gray-400';
+    const numColor = isWeekend ? 'text-blue-600' : '';
+    btn.innerHTML = `<div class="text-[11px] ${dayColor}">${DAYS[d.getDay()]}</div><div class="text-lg font-bold leading-tight ${numColor}">${d.getDate()}</div><div class="text-[11px] text-gray-400">${MONTHS[d.getMonth()]}</div>${isToday ? '<div class="text-[9px] text-blue-600 font-semibold mt-0.5">сьогодні</div>' : ''}`;
+    btn.onclick = () => { selectOne('.date-btn', btn); state.date = btn.dataset.val; state.time = null; state.equipment = null; checkStep1(); };
+    dateScroll.appendChild(btn);
+  }
+
   const dateStrs = Array.from(document.querySelectorAll('.date-btn')).map(b => b.dataset.val);
   if (!API_BASE_URL || dateStrs.length === 0) return;
   try {
-    const res = await fetch(`${API_BASE_URL}/days-status?dates=${encodeURIComponent(dateStrs.join(','))}`);
+    const res = await fetch(`${API_BASE_URL}/days-status?dates=${encodeURIComponent(dateStrs.join(','))}&_=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) throw new Error('bad response');
     const statusMap = await res.json();
     document.querySelectorAll('.date-btn').forEach(btn => {
@@ -189,7 +220,8 @@ for (let i=0;i<28;i++){
   } catch (e) {
     console.error('fetchDaysStatus failed:', e);
   }
-})();
+}
+initDateScroll();
 document.querySelectorAll('.dur-btn').forEach(btn=>{
   btn.onclick = () => { selectOne('.dur-btn', btn); state.duration = btn.dataset.val; state.time = null; state.equipment = null; checkStep1(); };
 });
@@ -298,7 +330,7 @@ async function fetchAvailability(date, duration){
   }
 
   try {
-    const res = await fetch(`${API_BASE_URL}/availability?date=${encodeURIComponent(date)}&equipment=all&duration=${encodeURIComponent(duration)}&_=${Date.now()}`);
+    const res = await fetch(`${API_BASE_URL}/availability?date=${encodeURIComponent(date)}&equipment=all&duration=${encodeURIComponent(duration)}&_=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) throw new Error('bad response');
     return await res.json();
   } catch (e) {
@@ -310,7 +342,7 @@ async function fetchAvailability(date, duration){
 async function fetchDayClosed(date){
   if (!API_BASE_URL) return false;
   try {
-    const res = await fetch(`${API_BASE_URL}/days-status?dates=${encodeURIComponent(date)}&_=${Date.now()}`);
+    const res = await fetch(`${API_BASE_URL}/days-status?dates=${encodeURIComponent(date)}&_=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) throw new Error('bad response');
     const data = await res.json();
     return !!data[date];
@@ -327,7 +359,7 @@ async function fetchDetailedAvailability(date, duration){
   const responses = await Promise.all(
     ALL_EQUIPMENT_IDS.map(async (id) => {
       try {
-        const res = await fetch(`${API_BASE_URL}/availability?date=${encodeURIComponent(date)}&equipment=${encodeURIComponent(id)}&duration=${encodeURIComponent(duration)}&_=${Date.now()}`);
+        const res = await fetch(`${API_BASE_URL}/availability?date=${encodeURIComponent(date)}&equipment=${encodeURIComponent(id)}&duration=${encodeURIComponent(duration)}&_=${Date.now()}`, { cache: 'no-store' });
         if (!res.ok) throw new Error('bad response');
         return { id, data: await res.json() };
       } catch (error) {
@@ -473,6 +505,7 @@ function selectOne(selector, active){
 }
 function setMainEnabled(ok){ document.getElementById('mainBtn').disabled = !ok; }
 function showStep(n){
+  clearWizardNotice();
   document.querySelectorAll('.step').forEach(s => s.classList.add('hidden'));
   document.getElementById('step'+n).classList.remove('hidden');
   document.getElementById('stepLabel').textContent = `Крок ${n} з 4`;
@@ -488,12 +521,88 @@ function showStep(n){
 function nextStep(){ if (step === 4){ submitBooking(); return; } step++; showStep(step); }
 function prevStep(){ if (step === 1) return; step--; showStep(step); }
 
-function submitBooking(){
+function showWizardNotice(text, isError){
+  let el = document.getElementById('wizardNotice');
+  if (!el){
+    el = document.createElement('div');
+    el.id = 'wizardNotice';
+    el.className = 'fixed left-0 right-0 bottom-24 px-4 z-20';
+    document.getElementById('app').appendChild(el);
+  }
+  el.innerHTML = `<div class="max-w-md mx-auto rounded-xl px-4 py-3 text-sm font-medium shadow-lg text-center ${isError ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}">${text}</div>`;
+}
+function clearWizardNotice(){
+  const el = document.getElementById('wizardNotice');
+  if (el) el.remove();
+}
+
+async function submitBooking(){
+  if (!tg?.sendData){
+    // Not actually running inside a proper Telegram Mini App session — sendData
+    // would silently do nothing and the booking would be lost with no feedback.
+    showWizardNotice('❌ Це можливо лише всередині Telegram. Відкрийте застосунок через кнопку в чаті з ботом.', true);
+    return;
+  }
+
+  const mainBtn = document.getElementById('mainBtn');
+  mainBtn.disabled = true;
+  mainBtn.textContent = 'Перевіряємо наявність…';
+  clearWizardNotice();
+
+  // Re-check this exact slot right before submitting: the availability shown
+  // earlier may be minutes old by the time the user finishes step 4, and someone
+  // else could have taken it in the meantime. Catching that here — instead of
+  // letting the app close and the user find out via a chat message later —
+  // is what "available in the UI but booking fails" was caused by.
+  try {
+    const fresh = await fetchAvailability(state.date, state.duration);
+    let stillAvailable = false;
+    if (state.duration === 'morning'){
+      stillAvailable = !fresh.closed && (fresh.availableByEquipment?.[state.equipment] ?? 0) >= state.quantity;
+    } else {
+      const slotStart = state.time.split('-')[0];
+      const slot = (fresh.slots || []).find(s => s.start === slotStart);
+      stillAvailable = !fresh.closed && !!slot && (slot.availableByEquipment?.[state.equipment] ?? 0) >= state.quantity;
+    }
+    if (!stillAvailable){
+      mainBtn.disabled = false;
+      mainBtn.textContent = 'Поділитись номером і забронювати';
+      showWizardNotice('⚠️ Це місце щойно зайняли. Оберіть інший час.', true);
+      return;
+    }
+  } catch (e) {
+    console.error('pre-submit availability check failed:', e);
+    // Fall through — the backend still re-validates atomically before writing,
+    // this check is a UX improvement, not the source of truth.
+  }
+
   const payload = { type:'booking', date: state.date, duration: state.duration, equipment: state.equipment, quantity: state.quantity, time: state.time, full_name: state.fullName };
-  const send = (phone) => { if (phone) payload.phone = phone; tg?.sendData(JSON.stringify(payload)); tg?.close(); };
+  const send = (phone) => {
+    if (phone) payload.phone = phone;
+    mainBtn.textContent = 'Надсилаємо…';
+    tg.sendData(JSON.stringify(payload));
+    // Telegram closes the Mini App itself right after sendData(); show the
+    // notice first so the user actually sees it during that brief window,
+    // and tells them where to look for the real confirmation.
+    showWizardNotice('✅ Заявку надіслано! Підтвердження прийде в чаті з ботом.', false);
+    setTimeout(() => tg?.close(), 600);
+  };
   if (tg?.requestContact){
-    tg.requestContact((shared, contact) => { send(shared ? contact?.responseUnsafe?.contact?.phone_number : null); });
-  } else { send(null); }
+    tg.requestContact((shared, contact) => {
+      const phone = shared ? contact?.responseUnsafe?.contact?.phone_number : null;
+      if (!phone){
+        mainBtn.disabled = false;
+        mainBtn.textContent = 'Поділитись номером і забронювати';
+        showWizardNotice('❌ Без номера телефону бронювання неможливе. Спробуйте ще раз і поділіться контактом.', true);
+        return;
+      }
+      send(phone);
+    });
+  } else {
+    mainBtn.disabled = false;
+    mainBtn.textContent = 'Поділитись номером і забронювати';
+    showWizardNotice('❌ Цей клієнт Telegram не підтримує надсилання контакту.', true);
+  }
 }
 showStep(1);
 
@@ -545,7 +654,8 @@ async function fetchMyBookings(phone){
   const params = new URLSearchParams();
   if (phone) params.set('phone', phone);
   if (tg?.initDataUnsafe?.user?.id) params.set('user_id', String(tg.initDataUnsafe.user.id));
-  const res = await fetch(`${API_BASE_URL}/mybookings?${params.toString()}`);
+  params.set('_', String(Date.now()));
+  const res = await fetch(`${API_BASE_URL}/mybookings?${params.toString()}`, { cache: 'no-store' });
   if (!res.ok) throw new Error('bad response');
   return await res.json();
 }
@@ -615,11 +725,22 @@ function initBookingsTab(){
 initBookingsTab();
 
 function cancelBooking(code, cardEl){
+  if (!tg?.sendData){
+    // Same problem as booking: outside a real Telegram Mini App session this
+    // would silently do nothing.
+    bookingSearchHint.textContent = '❌ Скасування можливе лише всередині Telegram.';
+    return;
+  }
+  const btn = cardEl.querySelector('.cancel-btn');
   cardEl.style.opacity = '0.4';
-  cardEl.querySelector('.cancel-btn').textContent = 'Скасовується…';
-  cardEl.querySelector('.cancel-btn').disabled = true;
-  tg?.sendData(JSON.stringify({ type:'cancel', cancel_code: code }));
-  tg?.close();
+  btn.textContent = 'Скасовується…';
+  btn.disabled = true;
+  tg.sendData(JSON.stringify({ type:'cancel', cancel_code: code }));
+  // As with booking, Telegram closes the Mini App right after sendData() is
+  // called — give the user a moment to actually see this before that happens,
+  // rather than the card just vanishing with no indication anything worked.
+  btn.textContent = '✅ Надіслано, перевірте чат';
+  setTimeout(() => tg?.close(), 900);
 }
 
 /* ================= ABOUT US ================= */
