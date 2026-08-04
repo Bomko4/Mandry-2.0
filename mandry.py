@@ -283,7 +283,27 @@ def generate_booking_code() -> str:
 
 
 def normalize_phone_number(phone: str) -> str:
-    return "".join(ch for ch in phone if ch.isdigit())
+    """Digits-only, canonicalized to the 380XXXXXXXXX form.
+
+    Phones enter the system two different ways that produce different digit
+    strings for the *same* number: Telegram's contact-share always returns the
+    full international form (e.g. "380989055753"), while a phone typed by hand
+    in the chat-based booking flow is often the local Ukrainian form starting
+    with "0" (e.g. "0989055753"). A plain digits-only compare never matches
+    those two forms against each other, which is why searching "Мої
+    бронювання" by phone could fail to find a real booking. Canonicalizing
+    both to the same 380-prefixed form fixes that.
+    """
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    if not digits:
+        return ""
+    if digits.startswith("380") and len(digits) == 12:
+        return digits
+    if digits.startswith("0") and len(digits) == 10:
+        return "380" + digits[1:]
+    if len(digits) == 9:
+        return "380" + digits
+    return digits
 
 
 def is_phone_blacklisted(phone: str) -> bool:
@@ -478,7 +498,7 @@ def is_morning_confirmed(ws) -> bool:
 
 
 async def finalize_morning_booking_if_needed(date_str: str):
-    ws = get_or_create_sheet(date_str)
+    ws = await get_or_create_sheet(date_str)
     ensure_morning_table(ws)
 
     booked_slots = count_morning_booked_slots(ws)
@@ -681,8 +701,8 @@ def _morning_available_quantity(all_values, requested_equipment: str) -> int:
     return _available_quantity_for_slot(all_values, write_row, 1, requested_equipment)
 
 
-def _build_availability_snapshot(date_str: str, duration_param: str) -> dict:
-    ws = get_or_create_sheet(date_str)
+async def _build_availability_snapshot(date_str: str, duration_param: str) -> dict:
+    ws = await get_or_create_sheet(date_str)
     all_values = ws.get_all_values()
 
     current_time = get_current_time()
@@ -819,32 +839,38 @@ def are_all_non_dash_columns_occupied(all_values, row_idx: int, duration: int, t
     statuses = [_col_status(all_values, row_idx, duration, col) for col in target_cols]
     return not any(s == "free" for s in statuses)
 
-def get_or_create_sheet(date_str):
-    try:
-        ws = sh.worksheet(date_str)
-        # Read only the first 10 rows of column A (header + 9 time slots).
-        # Reading the full column would include morning table rows which must not be touched here.
-        existing_col_a = ws.col_values(1)[:len(TIME_SLOTS) + 1]
-        for index, slot in enumerate(TIME_SLOTS, start=2):
-            current_value = existing_col_a[index - 1].strip() if len(existing_col_a) >= index else ""
-            if current_value != slot:
-                ws.update(gspread.utils.rowcol_to_a1(index, 1), [[slot]])
-        return ws
-    except gspread.exceptions.WorksheetNotFound:
-        # Re-check after acquiring intent to create — another concurrent call may have
-        # already created it while we were checking.
+async def get_or_create_sheet(date_str):
+    # The existence check + creation below is now serialized per-date with the same
+    # lock used for booking writes. Before this fix, several concurrent requests for
+    # a date that had no sheet yet (e.g. the mini app's 4 parallel per-equipment
+    # availability calls, or two different users opening the same new date at once)
+    # could all hit WorksheetNotFound at the same time and each call add_worksheet(),
+    # creating multiple duplicate sheets with the same date title. gspread's
+    # sh.worksheet(title) then returns whichever duplicate happens to be first,
+    # which is why hours/availability or "Мої бронювання" could intermittently look
+    # empty or wrong — later writes and reads could land on different duplicate
+    # sheets. Locking here makes "does this date have a sheet, if not create it"
+    # atomic, so only one sheet per date is ever created.
+    async with get_sheet_lock(date_str):
         try:
-            return sh.worksheet(date_str)
+            ws = sh.worksheet(date_str)
+            # Read only the first 10 rows of column A (header + 9 time slots).
+            # Reading the full column would include morning table rows which must not be touched here.
+            existing_col_a = ws.col_values(1)[:len(TIME_SLOTS) + 1]
+            for index, slot in enumerate(TIME_SLOTS, start=2):
+                current_value = existing_col_a[index - 1].strip() if len(existing_col_a) >= index else ""
+                if current_value != slot:
+                    ws.update(gspread.utils.rowcol_to_a1(index, 1), [[slot]])
+            return ws
         except gspread.exceptions.WorksheetNotFound:
-            pass
-        new_ws = sh.add_worksheet(title=date_str, rows="100", cols="30")
-        headers = ["ВІКНО"] + COLUMNS
-        new_ws.update('A1', [headers])
-        time_col = [[t] for t in TIME_SLOTS]
-        end_row = 1 + len(TIME_SLOTS)
-        new_ws.update(f'A2:A{end_row}', time_col)
-        reorder_booking_worksheets()
-        return new_ws
+            new_ws = sh.add_worksheet(title=date_str, rows="100", cols="30")
+            headers = ["ВІКНО"] + COLUMNS
+            new_ws.update('A1', [headers])
+            time_col = [[t] for t in TIME_SLOTS]
+            end_row = 1 + len(TIME_SLOTS)
+            new_ws.update(f'A2:A{end_row}', time_col)
+            reorder_booking_worksheets()
+            return new_ws
 
 
 def ensure_morning_table(ws) -> list:
@@ -1134,7 +1160,7 @@ async def process_web_app_data(message: types.Message, state: FSMContext):
         phone = "+" + phone
 
     is_morning = (duration_raw == "morning")
-    ws = get_or_create_sheet(selected_date)
+    ws = await get_or_create_sheet(selected_date)
     all_values = ws.get_all_values()
 
     if is_weather_blocked_sheet(all_values):
@@ -1298,7 +1324,7 @@ async def process_reminder_no(callback: types.CallbackQuery):
 @dp.callback_query(F.data.startswith("date_"))
 async def process_date(callback: types.CallbackQuery, state: FSMContext):
     selected_date = callback.data.split("_", 1)[1]
-    ws = get_or_create_sheet(selected_date)
+    ws = await get_or_create_sheet(selected_date)
     all_values = ws.get_all_values()
 
     if is_weather_blocked_sheet(all_values):
@@ -1338,7 +1364,7 @@ async def process_morning(callback: types.CallbackQuery, state: FSMContext):
 
     if selected_date:
         try:
-            ws = get_or_create_sheet(selected_date)
+            ws = await get_or_create_sheet(selected_date)
             ensure_morning_table(ws)
 
             if is_morning_weather_blocked(ws):
@@ -1398,7 +1424,7 @@ async def process_equip(callback: types.CallbackQuery, state: FSMContext):
     today_str = current_time.strftime("%d.%m")
     now_time = current_time.time()
 
-    ws = get_or_create_sheet(selected_date)
+    ws = await get_or_create_sheet(selected_date)
     all_values = ws.get_all_values()
 
     builder = InlineKeyboardBuilder()
@@ -1464,7 +1490,7 @@ async def process_time(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     duration = int(data.get('duration', 1))
 
-    ws = get_or_create_sheet(data['date'])
+    ws = await get_or_create_sheet(data['date'])
     all_values = ws.get_all_values()
 
     row_idx = start_index + 2
@@ -1520,7 +1546,7 @@ async def process_quantity(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("❌ Цей крок доступний лише для сапів", show_alert=True)
         return
 
-    ws = get_or_create_sheet(data['date'])
+    ws = await get_or_create_sheet(data['date'])
     all_values = ws.get_all_values()
 
     if data.get('morning'):
@@ -1610,7 +1636,7 @@ async def finalize_booking(message: types.Message, state: FSMContext, phone: str
             await state.clear()
             return
 
-        ws = get_or_create_sheet(data['date'])
+        ws = await get_or_create_sheet(data['date'])
         duration = int(data.get('duration', 1))
         async with booking_code_lock:
             booking_code = generate_booking_code()
@@ -1869,7 +1895,7 @@ async def api_availability(request: web.Request) -> web.Response:
             except ValueError:
                 return web.json_response({"error": "invalid date, expected dd.mm"}, status=400, headers=headers)
 
-            snapshot = _build_availability_snapshot(date_str, duration_param)
+            snapshot = await _build_availability_snapshot(date_str, duration_param)
             status = 400 if "error" in snapshot else 200
             return web.json_response(snapshot, status=status, headers=headers)
 
@@ -1880,7 +1906,7 @@ async def api_availability(request: web.Request) -> web.Response:
         except ValueError:
             return web.json_response({"error": "invalid date, expected dd.mm"}, status=400, headers=headers)
 
-        ws = get_or_create_sheet(date_str)
+        ws = await get_or_create_sheet(date_str)
         all_values = ws.get_all_values()
 
         current_time = get_current_time()
