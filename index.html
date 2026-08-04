@@ -81,13 +81,6 @@
         <button id="bookingShareBtn" class="w-full bg-blue-600 text-white font-semibold py-3.5 rounded-2xl">
           Поділитися номером
         </button>
-        <div class="text-center text-xs text-gray-400 mt-2">або введіть номер вручну</div>
-        <label class="block text-xs text-gray-400 mb-1 mt-3" for="bookingPhoneInput">Номер телефону</label>
-        <input id="bookingPhoneInput" type="tel" inputmode="tel" autocomplete="tel" placeholder="+380XXXXXXXXX"
-          class="w-full rounded-xl border border-gray-200 px-3 py-3 text-base outline-none focus:border-blue-600">
-        <button id="bookingSearchBtn" class="w-full mt-3 bg-blue-600 text-white font-semibold py-3.5 rounded-2xl disabled:bg-gray-300">
-          Пошук
-        </button>
         <div id="bookingSearchHint" class="text-xs text-gray-400 mt-2"></div>
       </div>
       <div id="bookingsList" class="flex flex-col gap-3"></div>
@@ -432,10 +425,7 @@ showStep(1);
 const bookingsList = document.getElementById('bookingsList');
 const bookingSearchBox = document.getElementById('bookingSearchBox');
 const bookingShareBtn = document.getElementById('bookingShareBtn');
-const bookingPhoneInput = document.getElementById('bookingPhoneInput');
-const bookingSearchBtn = document.getElementById('bookingSearchBtn');
 const bookingSearchHint = document.getElementById('bookingSearchHint');
-const BOOKING_PHONE_STORAGE_KEY = 'mandry.bookingPhone';
 
 function normalizePhoneInput(value){
   const digits = String(value || '').replace(/\D/g, '');
@@ -443,22 +433,12 @@ function normalizePhoneInput(value){
   return `+${digits}`;
 }
 
-function getStoredBookingPhone(){
-  return localStorage.getItem(BOOKING_PHONE_STORAGE_KEY) || '';
-}
-
-function setStoredBookingPhone(phone){
-  if (phone) localStorage.setItem(BOOKING_PHONE_STORAGE_KEY, phone);
-}
-
 async function shareBookingContact(){
   if (!tg?.requestContact){
-    bookingSearchHint.textContent = 'Контактний доступ недоступний. Введіть номер вручну.';
-    bookingPhoneInput.focus();
+    bookingSearchHint.textContent = 'Контактний доступ недоступний у цьому клієнті Telegram.';
     return;
   }
 
-  bookingSearchBtn.disabled = true;
   bookingSearchHint.textContent = 'Запитуємо контакт…';
 
   try {
@@ -473,17 +453,14 @@ async function shareBookingContact(){
 
     if (!result.shared || !result.phone){
       bookingSearchHint.textContent = 'Контакт не було надано.';
-      bookingSearchBtn.disabled = !normalizePhoneInput(bookingPhoneInput.value);
       return;
     }
 
     const normalizedPhone = normalizePhoneInput(result.phone);
-    bookingPhoneInput.value = normalizedPhone;
     await renderBookings(normalizedPhone);
   } catch (error) {
     console.error('shareBookingContact failed:', error);
     bookingSearchHint.textContent = 'Не вдалося отримати контакт.';
-    bookingSearchBtn.disabled = !normalizePhoneInput(bookingPhoneInput.value);
   }
 }
 
@@ -499,24 +476,18 @@ function renderBookingsEmptyState(message){
 }
 
 function renderBookingSearchState(){
-  const savedPhone = getStoredBookingPhone();
-  bookingPhoneInput.value = savedPhone;
-  bookingSearchHint.textContent = savedPhone ? `Пошук за номером ${savedPhone}` : 'Введіть номер телефону, який використовували під час бронювання.';
-  bookingSearchBtn.disabled = !normalizePhoneInput(bookingPhoneInput.value);
-  bookingSearchBox.classList.remove('hidden');
+  bookingSearchHint.textContent = 'Натисніть кнопку, щоб поділитися номером і завантажити свої бронювання.';
 }
 
 async function renderBookings(phone){
-  const normalizedPhone = normalizePhoneInput(phone || bookingPhoneInput.value || getStoredBookingPhone());
+  const normalizedPhone = normalizePhoneInput(phone);
   if (!normalizedPhone){
     renderBookingSearchState();
-    renderBookingsEmptyState('Спочатку введіть номер телефону для пошуку бронювань.');
+    renderBookingsEmptyState('Спершу поділіться номером телефону.');
     return;
   }
 
-  bookingPhoneInput.value = normalizedPhone;
   bookingSearchHint.textContent = `Шукаємо бронювання за ${normalizedPhone}…`;
-  bookingSearchBtn.disabled = true;
   bookingsList.innerHTML = `<div class="text-center text-gray-400 text-sm mt-10">Завантаження…</div>`;
   let bookings;
   try {
@@ -524,21 +495,17 @@ async function renderBookings(phone){
   } catch (e) {
     console.error('fetchMyBookings failed:', e);
     bookingSearchHint.textContent = 'Не вдалося виконати пошук. Спробуйте ще раз.';
-    bookingSearchBtn.disabled = false;
     bookingsList.innerHTML = `<div class="text-center text-gray-400 text-sm mt-10">Не вдалося завантажити бронювання. Спробуйте ще раз.</div>`;
     return;
   }
 
   if (bookings.length === 0){
     bookingSearchHint.textContent = `Бронювань за ${normalizedPhone} не знайдено.`;
-    bookingSearchBtn.disabled = false;
     bookingsList.innerHTML = `<div class="text-center text-gray-400 text-sm mt-10">У вас ще немає бронювань</div>`;
     return;
   }
 
-  setStoredBookingPhone(normalizedPhone);
   bookingSearchHint.textContent = `Знайдено ${bookings.length} бронювань за ${normalizedPhone}.`;
-  bookingSearchBtn.disabled = false;
   bookingsList.innerHTML = '';
   bookings.forEach(b => {
     const card = document.createElement('div');
@@ -557,26 +524,11 @@ async function renderBookings(phone){
   });
 }
 
-bookingSearchBtn.onclick = () => renderBookings(bookingPhoneInput.value);
 bookingShareBtn.onclick = () => shareBookingContact();
-bookingPhoneInput.addEventListener('input', () => {
-  bookingSearchBtn.disabled = !normalizePhoneInput(bookingPhoneInput.value);
-});
-bookingPhoneInput.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    renderBookings(bookingPhoneInput.value);
-  }
-});
 
 function initBookingsTab(){
-  const savedPhone = getStoredBookingPhone();
-  if (savedPhone){
-    renderBookings(savedPhone);
-    return;
-  }
   renderBookingSearchState();
-  renderBookingsEmptyState('Введіть номер телефону, щоб знайти свої бронювання.');
+  renderBookingsEmptyState('Натисніть “Поділитися номером”, щоб знайти свої бронювання.');
 }
 
 initBookingsTab();
