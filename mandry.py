@@ -673,6 +673,87 @@ def _morning_available_quantity(all_values, requested_equipment: str) -> int:
     write_row = data_row_idx + 1
     return _available_quantity_for_slot(all_values, write_row, 1, requested_equipment)
 
+
+def _build_availability_snapshot(date_str: str, duration_param: str) -> dict:
+    ws = get_or_create_sheet(date_str)
+    all_values = ws.get_all_values()
+
+    current_time = get_current_time()
+    today_str = current_time.strftime("%d.%m")
+    now_time = current_time.time()
+
+    if duration_param == "morning":
+        if is_weather_blocked_sheet(all_values):
+            return {"closed": True, "available": False, "maxQty": 0}
+
+        ensure_morning_table(ws)
+        refreshed_values = ws.get_all_values()
+        if is_morning_weather_blocked(ws):
+            return {"closed": True, "available": False, "maxQty": 0}
+
+        confirmed = is_morning_confirmed(ws)
+        past_deadline = current_time >= get_morning_booking_deadline(date_str)
+        if past_deadline and not confirmed:
+            return {"closed": True, "available": False, "maxQty": 0}
+
+        header_row_idx, data_row_idx = _morning_table_row_indexes(refreshed_values)
+        if header_row_idx is None or data_row_idx is None:
+            return {"closed": True, "available": False, "maxQty": 0}
+
+        available_by_equipment = {
+            equipment_name: _available_quantity_for_slot(refreshed_values, data_row_idx + 1, 1, equipment_name)
+            for equipment_name in EQUIPMENT_COLUMN_GROUPS
+        }
+        return {
+            "closed": False,
+            "morning": True,
+            "available": any(qty > 0 for qty in available_by_equipment.values()),
+            "maxQty": max(available_by_equipment.values(), default=0),
+            "availableByEquipment": available_by_equipment,
+        }
+
+    duration = int(duration_param)
+    if duration not in (1, 2):
+        return {"error": "invalid duration"}
+
+    if is_weather_blocked_sheet(all_values):
+        return {"closed": True, "slots": []}
+
+    max_start_index = len(TIME_SLOTS) - duration
+    slots = []
+
+    for start_index in range(max_start_index + 1):
+        start_time_str = TIME_SLOTS[start_index].split('-')[0]
+        start_time = datetime.strptime(start_time_str, "%H:%M").time()
+        row_idx = start_index + 2
+
+        if date_str == today_str and start_time <= now_time:
+            slots.append({"start": start_time_str, "available": False, "maxQty": 0, "availableByEquipment": {}})
+            continue
+
+        if all(_col_status(all_values, row_idx, duration, col) == "star" for col in range(2, len(COLUMNS) + 2)):
+            slots.append({"start": start_time_str, "available": False, "maxQty": 0, "availableByEquipment": {}})
+            continue
+
+        available_by_equipment = {
+            equipment_name: _available_quantity_for_slot(all_values, row_idx, duration, equipment_name)
+            for equipment_name in EQUIPMENT_COLUMN_GROUPS
+        }
+        max_qty = max(available_by_equipment.values(), default=0)
+
+        if max_qty <= 0:
+            slots.append({"start": start_time_str, "available": False, "maxQty": 0, "availableByEquipment": available_by_equipment})
+            continue
+
+        slots.append({
+            "start": start_time_str,
+            "available": True,
+            "maxQty": max_qty,
+            "availableByEquipment": available_by_equipment,
+        })
+
+    return {"closed": False, "slots": slots}
+
 def _get_cell(all_values, row_idx: int, col: int) -> str:
     """Return stripped cell value (1-based row_idx, 1-based col)."""
     row = all_values[row_idx - 1] if row_idx - 1 < len(all_values) else []
@@ -1756,6 +1837,11 @@ async def api_availability(request: web.Request) -> web.Response:
             datetime.strptime(date_str, "%d.%m")
         except ValueError:
             return web.json_response({"error": "invalid date, expected dd.mm"}, status=400, headers=headers)
+
+        if equipment == "all":
+            snapshot = _build_availability_snapshot(date_str, duration_param)
+            status = 400 if "error" in snapshot else 200
+            return web.json_response(snapshot, status=status, headers=headers)
 
         ws = get_or_create_sheet(date_str)
         all_values = ws.get_all_values()

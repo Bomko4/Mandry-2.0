@@ -290,13 +290,13 @@ function addMinutesToTime(hhmm, minutesToAdd){
   return String(nh).padStart(2,'0') + ':' + String(nm).padStart(2,'0');
 }
 
-async function fetchAvailability(date, equipment, duration){
+async function fetchAvailability(date, duration){
   if (!API_BASE_URL){
     console.warn('API_BASE_URL is not set — availability cannot be checked, all slots will show as unavailable.');
     return duration === 'morning' ? { closed: true, available: false, maxQty: 0 } : { closed: true, slots: [] };
   }
   try {
-    const res = await fetch(`${API_BASE_URL}/availability?date=${encodeURIComponent(date)}&equipment=${encodeURIComponent(equipment)}&duration=${encodeURIComponent(duration)}`);
+    const res = await fetch(`${API_BASE_URL}/availability?date=${encodeURIComponent(date)}&equipment=all&duration=${encodeURIComponent(duration)}`);
     if (!res.ok) throw new Error('bad response');
     return await res.json();
   } catch (e) {
@@ -308,19 +308,15 @@ async function fetchAvailability(date, equipment, duration){
 async function renderTimeSlots(){
   timeGrid.innerHTML = '<div class="col-span-2 text-center text-sm text-gray-400 py-4">Завантаження…</div>';
   slotAvailability = {};
-  const results = await Promise.all(
-    ALL_EQUIPMENT_IDS.map(id => fetchAvailability(state.date, id, state.duration).then(r => ({ id, r })))
-  );
+  const summary = await fetchAvailability(state.date, state.duration);
   timeGrid.innerHTML = '';
 
   if (state.duration === 'morning'){
-    let closed = true;
-    results.forEach(({ id, r }) => {
-      slotAvailability[id] = { [MORNING_WINDOW]: r.closed ? 0 : (r.maxQty || 0) };
-      if (!r.closed) closed = false;
+    ALL_EQUIPMENT_IDS.forEach(id => {
+      const qty = summary.availableByEquipment?.[id] ?? 0;
+      slotAvailability[id] = { [MORNING_WINDOW]: qty };
     });
-    const anyAvailable = results.some(({ r }) => !r.closed && r.available);
-    const isSelectable = !closed && anyAvailable;
+    const isSelectable = !summary.closed && (summary.maxQty || 0) > 0;
     const btn = document.createElement('button');
     btn.className = 'time-btn col-span-2 py-3 rounded-2xl border-2 border-transparent shadow-sm font-medium '
       + (isSelectable ? 'bg-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed');
@@ -339,7 +335,7 @@ async function renderTimeSlots(){
     return;
   }
 
-  if (results.every(({ r }) => r.closed)){
+  if (summary.closed){
     timeGrid.innerHTML = '<div class="col-span-2 text-center text-sm text-gray-400 py-4">На цю дату немає вільних місць</div>';
     return;
   }
@@ -348,24 +344,23 @@ async function renderTimeSlots(){
   ALL_EQUIPMENT_IDS.forEach(id => slotAvailability[id] = {});
   const startTimes = TIME_SLOTS.slice(0, TIME_SLOTS.length - dur + 1).map(slot => slot.split('-')[0]);
 
-  startTimes.forEach(start => {
-    const end = addMinutesToTime(start, dur * 60);
-    const label = `${start}–${end}`;
-    let maxQtyAny = 0;
-    results.forEach(({ id, r }) => {
-      const slot = r.closed ? null : (r.slots || []).find(s => s.start === start);
-      const qty = slot?.available ? (slot.maxQty || 0) : 0;
-      slotAvailability[id][start] = qty;
-      if (qty > maxQtyAny) maxQtyAny = qty;
+  (summary.slots || []).forEach(slot => {
+    const end = addMinutesToTime(slot.start, dur * 60);
+    const label = `${slot.start}–${end}`;
+    const availableByEquipment = slot.availableByEquipment || {};
+
+    ALL_EQUIPMENT_IDS.forEach(id => {
+      slotAvailability[id][slot.start] = availableByEquipment[id] ?? 0;
     });
-    const isSelectable = maxQtyAny > 0;
+
+    const isSelectable = (slot.maxQty || 0) > 0;
     const btn = document.createElement('button');
     btn.className = 'time-btn py-3 rounded-2xl border-2 border-transparent shadow-sm font-medium text-sm '
       + (isSelectable ? 'bg-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed');
     btn.textContent = label;
     btn.disabled = !isSelectable;
     if (isSelectable){
-      btn.onclick = () => { selectOne('.time-btn', btn); state.time = TIME_SLOTS.find(s => s.startsWith(start)); state.equipment = null; setMainEnabled(true); };
+      btn.onclick = () => { selectOne('.time-btn', btn); state.time = TIME_SLOTS.find(s => s.startsWith(slot.start)); state.equipment = null; setMainEnabled(true); };
     }
     timeGrid.appendChild(btn);
   });
