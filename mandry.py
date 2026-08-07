@@ -3,6 +3,7 @@ import gspread
 import socket
 import random
 import os
+import time
 from aiohttp import web
 from dotenv import load_dotenv
 from google.auth.exceptions import RefreshError
@@ -128,6 +129,59 @@ morning_finalization_tasks: dict[str, asyncio.Task] = {}
 # One lock per date-sheet to serialize structural writes (sheet repair, morning table
 # creation, booking writes) and prevent duplicate rows / column collisions under load.
 sheet_locks: dict[str, asyncio.Lock] = {}
+
+
+
+# --- Read-side caches to cut Google Sheets API round-trips -----------------
+# Every read below is a blocking network call, and the mini app fires many of
+# them (up to 28 dates at once for the calendar, 4 in parallel per date for
+# per-equipment availability). These caches are short-lived and read-only:
+# they never sit between a booking write and its confirmation, so booking
+# correctness (already guarded by the per-date locks + re-read-before-write
+# pattern below) is unaffected. Anything that writes to a worksheet
+# invalidates its entry immediately after the write.
+_WORKSHEETS_CACHE_TTL = 5.0   # how long the list of worksheet titles is trusted
+_VALUES_CACHE_TTL = 3.0       # how long one worksheet's cell values are trusted
+_worksheets_cache: dict = {"data": None, "ts": 0.0}
+_values_cache: dict = {}
+
+
+def _cached_worksheets(force: bool = False) -> list:
+    now = time.monotonic()
+    if force or _worksheets_cache["data"] is None or (now - _worksheets_cache["ts"]) > _WORKSHEETS_CACHE_TTL:
+        _worksheets_cache["data"] = sh.worksheets()
+        _worksheets_cache["ts"] = now
+    return _worksheets_cache["data"]
+
+
+def _invalidate_worksheets_cache():
+    _worksheets_cache["data"] = None
+
+
+def _find_worksheet_by_title(title: str, force_refresh: bool = False):
+    for ws in _cached_worksheets(force=force_refresh):
+        if ws.title == title:
+            return ws
+    return None
+
+
+def _cached_get_all_values(ws, force: bool = False) -> list:
+    now = time.monotonic()
+    cached = _values_cache.get(ws.id)
+    if not force and cached is not None and (now - cached[0]) <= _VALUES_CACHE_TTL:
+        return cached[1]
+    values = ws.get_all_values()
+    _values_cache[ws.id] = (now, values)
+    return values
+
+
+def _set_cached_values(ws, values: list):
+    _values_cache[ws.id] = (time.monotonic(), values)
+
+
+def _invalidate_values_cache(ws):
+    _values_cache.pop(ws.id, None)
+# -----------------------------------------------------------------------------
 
 
 def get_sheet_lock(date_str: str) -> asyncio.Lock:
@@ -598,7 +652,7 @@ def get_booking_worksheets_from_today() -> list:
     today = now.date()
     relevant_sheets = []
 
-    for ws in sh.worksheets():
+    for ws in _cached_worksheets():
         try:
             sheet_day = datetime.strptime(ws.title, "%d.%m").replace(year=now.year)
         except ValueError:
@@ -629,7 +683,7 @@ def reorder_booking_worksheets():
     dated_worksheets = []
     other_worksheets = []
 
-    for ws in sh.worksheets():
+    for ws in _cached_worksheets(force=True):
         if ws.id == first_ws.id:
             continue
 
@@ -644,6 +698,7 @@ def reorder_booking_worksheets():
     ordered_worksheets.extend(other_worksheets)
 
     sh.reorder_worksheets(ordered_worksheets)
+    _invalidate_worksheets_cache()
 
 
 def resolve_equipment_booking(requested_equipment: str, all_values, row_idx: int, duration: int):
@@ -732,7 +787,13 @@ def _morning_available_quantity(all_values, requested_equipment: str) -> int:
 
 async def _build_availability_snapshot(date_str: str, duration_param: str) -> dict:
     ws = await get_or_create_sheet(date_str)
-    all_values = ws.get_all_values()
+    # All the sheet reads/writes below are blocking gspread calls — run them
+    # off the event loop so concurrent requests don't queue up behind each other.
+    return await asyncio.to_thread(_compute_availability_snapshot_sync, ws, date_str, duration_param)
+
+
+def _compute_availability_snapshot_sync(ws, date_str: str, duration_param: str) -> dict:
+    all_values = _cached_get_all_values(ws)
 
     current_time = get_current_time()
     today_str = current_time.strftime("%d.%m")
@@ -883,29 +944,51 @@ async def get_or_create_sheet(date_str):
     # sheets. Locking here makes "does this date have a sheet, if not create it"
     # atomic, so only one sheet per date is ever created.
     async with get_sheet_lock(date_str):
-        try:
-            ws = sh.worksheet(date_str)
-            # Read only the first 10 rows of column A (header + 9 time slots).
-            # Reading the full column would include morning table rows which must not be touched here.
-            existing_col_a = ws.col_values(1)[:len(TIME_SLOTS) + 1]
-            for index, slot in enumerate(TIME_SLOTS, start=2):
-                current_value = existing_col_a[index - 1].strip() if len(existing_col_a) >= index else ""
-                if current_value != slot:
-                    ws.update(gspread.utils.rowcol_to_a1(index, 1), [[slot]])
-            return ws
-        except gspread.exceptions.WorksheetNotFound:
-            new_ws = sh.add_worksheet(title=date_str, rows="100", cols="30")
-            headers = ["ВІКНО"] + COLUMNS
-            new_ws.update('A1', [headers])
-            time_col = [[t] for t in TIME_SLOTS]
-            end_row = 1 + len(TIME_SLOTS)
-            new_ws.update(f'A2:A{end_row}', time_col)
-            reorder_booking_worksheets()
-            return new_ws
+        # All the actual Sheets API calls are blocking (gspread uses requests),
+        # so they're run off the event loop thread here — this is what lets
+        # several dates/equipment types actually load in parallel instead of
+        # queuing up behind each other.
+        return await asyncio.to_thread(_get_or_create_sheet_locked, date_str)
+
+
+def _get_or_create_sheet_locked(date_str):
+    ws = _find_worksheet_by_title(date_str)
+    if ws is None:
+        # Cache might just be a few seconds stale (e.g. another request created
+        # this exact sheet moments ago) — confirm with a fresh fetch before
+        # deciding to create a brand-new one, to avoid duplicate date sheets.
+        ws = _find_worksheet_by_title(date_str, force_refresh=True)
+
+    if ws is not None:
+        # Read only the header + 9 time-slot rows worth of data we need to
+        # verify; reusing the cached full read (shared with availability
+        # lookups for the same date) avoids a second network round-trip.
+        all_values = _cached_get_all_values(ws)
+        fixes = []
+        for index, slot in enumerate(TIME_SLOTS, start=2):
+            row = all_values[index - 1] if index - 1 < len(all_values) else []
+            current_value = row[0].strip() if row else ""
+            if current_value != slot:
+                fixes.append({"range": gspread.utils.rowcol_to_a1(index, 1), "values": [[slot]]})
+        if fixes:
+            # One batched write instead of one request per mismatched cell.
+            ws.batch_update(fixes)
+            _invalidate_values_cache(ws)
+        return ws
+
+    new_ws = sh.add_worksheet(title=date_str, rows="100", cols="30")
+    headers = ["ВІКНО"] + COLUMNS
+    new_ws.update('A1', [headers])
+    time_col = [[t] for t in TIME_SLOTS]
+    end_row = 1 + len(TIME_SLOTS)
+    new_ws.update(f'A2:A{end_row}', time_col)
+    _invalidate_worksheets_cache()
+    reorder_booking_worksheets()
+    return new_ws
 
 
 def ensure_morning_table(ws) -> list:
-    all_vals = ws.get_all_values()
+    all_vals = _cached_get_all_values(ws)
 
     # Find ALL morning header rows (to detect duplicates)
     header_rows = [
@@ -928,6 +1011,7 @@ def ensure_morning_table(ws) -> list:
             except Exception:
                 pass
         all_vals = ws.get_all_values()
+        _set_cached_values(ws, all_vals)
         header_rows = [header_rows[0]]
 
     if header_rows:
@@ -938,11 +1022,15 @@ def ensure_morning_table(ws) -> list:
             current_value = all_vals[data_row_1based - 1][0].strip() if all_vals[data_row_1based - 1] else ""
             if current_value != MORNING_WINDOW:
                 ws.update(gspread.utils.rowcol_to_a1(data_row_1based, 1), [[MORNING_WINDOW]])
-                return ws.get_all_values()
+                fresh_values = ws.get_all_values()
+                _set_cached_values(ws, fresh_values)
+                return fresh_values
         else:
             # Data row missing — append it
             ws.append_rows([[MORNING_WINDOW] + ["" for _ in COLUMNS]])
-            return ws.get_all_values()
+            fresh_values = ws.get_all_values()
+            _set_cached_values(ws, fresh_values)
+            return fresh_values
         return all_vals
 
     # No morning table at all — append both rows at once
@@ -950,7 +1038,9 @@ def ensure_morning_table(ws) -> list:
         ["Ранковий сплав"] + COLUMNS,
         [MORNING_WINDOW] + ["" for _ in COLUMNS],
     ])
-    return ws.get_all_values()
+    fresh_values = ws.get_all_values()
+    _set_cached_values(ws, fresh_values)
+    return fresh_values
 
 
 def is_morning_weather_blocked(ws, all_values=None) -> bool:
@@ -1931,6 +2021,76 @@ def _sup_max_qty(all_values, row_idx: int, duration: int, requested_equipment: s
     return min(10, len(free_primary) + len(free_fallback))
 
 
+def _compute_single_equipment_availability_sync(ws, date_str: str, equipment: str, duration_param: str) -> dict:
+    all_values = _cached_get_all_values(ws)
+
+    current_time = get_current_time()
+    today_str = current_time.strftime("%d.%m")
+    now_time = current_time.time()
+
+    if duration_param == "morning":
+        if is_weather_blocked_sheet(all_values):
+            return {"closed": True, "available": False, "maxQty": 0}
+
+        if is_morning_booking_closed(date_str):
+            return {"closed": True, "available": False, "maxQty": 0}
+
+        refreshed_values = ensure_morning_table(ws)
+        if is_morning_weather_blocked(ws, refreshed_values):
+            return {"closed": True, "available": False, "maxQty": 0}
+
+        confirmed = is_morning_confirmed(ws, refreshed_values)
+        past_deadline = current_time >= get_morning_booking_deadline(date_str)
+        if past_deadline and not confirmed:
+            return {"closed": True, "available": False, "maxQty": 0}
+
+        header_row_idx, data_row_idx = _morning_table_row_indexes(refreshed_values)
+        if header_row_idx is None or data_row_idx is None:
+            return {"closed": True, "available": False, "maxQty": 0}
+
+        max_qty = _morning_available_quantity(refreshed_values, equipment)
+
+        return {"closed": False, "available": max_qty > 0, "maxQty": max_qty}
+
+    duration = int(duration_param)
+    if duration not in (1, 2):
+        return {"error": "invalid duration"}
+
+    if is_weather_blocked_sheet(all_values):
+        return {"closed": True, "slots": []}
+
+    max_start_index = len(TIME_SLOTS) - duration
+    slots = []
+    target_cols, _ = _equipment_target_columns_for_availability(equipment)
+
+    for start_index in range(max_start_index + 1):
+        start_time_str = TIME_SLOTS[start_index].split('-')[0]
+        start_time = datetime.strptime(start_time_str, "%H:%M").time()
+        row_idx = start_index + 2
+
+        if date_str == today_str and start_time <= now_time:
+            slots.append({"start": start_time_str, "available": False, "maxQty": 0})
+            continue
+
+        if is_weather_blocked_slot(all_values, row_idx, duration, target_cols):
+            slots.append({"start": start_time_str, "available": False, "maxQty": 0})
+            continue
+
+        if is_live_queue_only_slot(all_values, row_idx, duration, target_cols):
+            # Mini app doesn't support the live-queue flow — treat as unavailable here.
+            slots.append({"start": start_time_str, "available": False, "maxQty": 0})
+            continue
+
+        max_qty = _available_quantity_for_slot(all_values, row_idx, duration, equipment)
+        if max_qty <= 0:
+            slots.append({"start": start_time_str, "available": False, "maxQty": 0})
+            continue
+
+        slots.append({"start": start_time_str, "available": max_qty > 0, "maxQty": max_qty})
+
+    return {"closed": False, "slots": slots}
+
+
 async def api_availability(request: web.Request) -> web.Response:
     headers = _cors_headers()
     try:
@@ -1956,73 +2116,11 @@ async def api_availability(request: web.Request) -> web.Response:
             return web.json_response({"error": "invalid date, expected dd.mm"}, status=400, headers=headers)
 
         ws = await get_or_create_sheet(date_str)
-        all_values = ws.get_all_values()
-
-        current_time = get_current_time()
-        today_str = current_time.strftime("%d.%m")
-        now_time = current_time.time()
-
-        if duration_param == "morning":
-            if is_weather_blocked_sheet(all_values):
-                return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
-
-            if is_morning_booking_closed(date_str):
-                return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
-
-            refreshed_values = ensure_morning_table(ws)
-            if is_morning_weather_blocked(ws, refreshed_values):
-                return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
-
-            confirmed = is_morning_confirmed(ws, refreshed_values)
-            past_deadline = current_time >= get_morning_booking_deadline(date_str)
-            if past_deadline and not confirmed:
-                return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
-
-            header_row_idx, data_row_idx = _morning_table_row_indexes(refreshed_values)
-            if header_row_idx is None or data_row_idx is None:
-                return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
-
-            max_qty = _morning_available_quantity(refreshed_values, equipment)
-
-            return web.json_response({"closed": False, "available": max_qty > 0, "maxQty": max_qty}, headers=headers)
-
-        duration = int(duration_param)
-        if duration not in (1, 2):
-            return web.json_response({"error": "invalid duration"}, status=400, headers=headers)
-
-        if is_weather_blocked_sheet(all_values):
-            return web.json_response({"closed": True, "slots": []}, headers=headers)
-
-        max_start_index = len(TIME_SLOTS) - duration
-        slots = []
-        target_cols, _ = _equipment_target_columns_for_availability(equipment)
-
-        for start_index in range(max_start_index + 1):
-            start_time_str = TIME_SLOTS[start_index].split('-')[0]
-            start_time = datetime.strptime(start_time_str, "%H:%M").time()
-            row_idx = start_index + 2
-
-            if date_str == today_str and start_time <= now_time:
-                slots.append({"start": start_time_str, "available": False, "maxQty": 0})
-                continue
-
-            if is_weather_blocked_slot(all_values, row_idx, duration, target_cols):
-                slots.append({"start": start_time_str, "available": False, "maxQty": 0})
-                continue
-
-            if is_live_queue_only_slot(all_values, row_idx, duration, target_cols):
-                # Mini app doesn't support the live-queue flow — treat as unavailable here.
-                slots.append({"start": start_time_str, "available": False, "maxQty": 0})
-                continue
-
-            max_qty = _available_quantity_for_slot(all_values, row_idx, duration, equipment)
-            if max_qty <= 0:
-                slots.append({"start": start_time_str, "available": False, "maxQty": 0})
-                continue
-
-            slots.append({"start": start_time_str, "available": max_qty > 0, "maxQty": max_qty})
-
-        return web.json_response({"closed": False, "slots": slots}, headers=headers)
+        result = await asyncio.to_thread(
+            _compute_single_equipment_availability_sync, ws, date_str, equipment, duration_param
+        )
+        status = 400 if "error" in result else 200
+        return web.json_response(result, status=status, headers=headers)
 
     except Exception as e:
         print(f"[ERROR] api_availability: {e}")
@@ -2039,11 +2137,25 @@ async def api_mybookings(request: web.Request) -> web.Response:
         phone_normalized = normalize_phone_number(phone)
         marker = f"UID:{user_id}" if user_id else ""
 
-        results = {}  # (date, code) -> {rows:set, cols:set, is_morning:bool}
-        for ws in get_booking_worksheets_from_today():
+        worksheets = await asyncio.to_thread(get_booking_worksheets_from_today)
+
+        async def _read_sheet(ws):
             try:
-                date_str = ws.title
-                all_values = ws.get_all_values()
+                values = await asyncio.to_thread(_cached_get_all_values, ws)
+                return ws.title, values, None
+            except Exception as sheet_err:
+                return ws.title, None, sheet_err
+
+        # Read every upcoming date's sheet concurrently instead of one-by-one —
+        # this used to be the slowest part of "Мої бронювання" since it did a
+        # blocking network round-trip per date, in sequence.
+        sheet_reads = await asyncio.gather(*[_read_sheet(ws) for ws in worksheets])
+
+        results = {}  # (date, code) -> {rows:set, cols:set, is_morning:bool}
+        for date_str, all_values, sheet_err in sheet_reads:
+            try:
+                if sheet_err is not None:
+                    raise sheet_err
                 for r_idx, row in enumerate(all_values, start=1):
                     for c_idx, cell in enumerate(row, start=1):
                         if not isinstance(cell, str):
@@ -2072,7 +2184,7 @@ async def api_mybookings(request: web.Request) -> web.Response:
                             if saved_phone:
                                 entry["phone"] = saved_phone
             except Exception as sheet_err:
-                print(f"[WARNING] api_mybookings skipped sheet {ws.title}: {sheet_err}")
+                print(f"[WARNING] api_mybookings skipped sheet {date_str}: {sheet_err}")
                 continue
 
         bookings = []
@@ -2107,18 +2219,30 @@ async def api_days_status(request: web.Request) -> web.Response:
     headers = _cors_headers()
     try:
         dates_param = request.query.get("dates", "")
-        result = {}
+        date_strs = []
         for date_str in [d.strip() for d in dates_param.split(",") if d.strip()]:
             try:
                 datetime.strptime(date_str, "%d.%m")
             except ValueError:
                 continue
-            try:
-                ws = sh.worksheet(date_str)
-            except gspread.exceptions.WorksheetNotFound:
-                result[date_str] = False
-                continue
-            result[date_str] = is_weather_blocked_sheet(ws.get_all_values())
+            date_strs.append(date_str)
+
+        # The calendar view asks about up to ~28 dates in a single request.
+        # Previously this looked each one up with a full spreadsheet-metadata
+        # fetch (sh.worksheet) plus a full sheet read, one date at a time —
+        # by far the slowest thing in the app. Now the worksheet list is
+        # fetched once (cached) and every date's sheet is read concurrently.
+        await asyncio.to_thread(_cached_worksheets)
+
+        async def _status_for(date_str):
+            ws = await asyncio.to_thread(_find_worksheet_by_title, date_str)
+            if ws is None:
+                return date_str, False
+            values = await asyncio.to_thread(_cached_get_all_values, ws)
+            return date_str, is_weather_blocked_sheet(values)
+
+        pairs = await asyncio.gather(*[_status_for(d) for d in date_strs])
+        result = dict(pairs)
         return web.json_response(result, headers=headers)
     except Exception as e:
         print(f"[ERROR] api_days_status: {e}")
