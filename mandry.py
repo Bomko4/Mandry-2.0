@@ -106,8 +106,8 @@ try:
         respect_retry_after_header=True,
     )
     _adapter = HTTPAdapter(max_retries=_retry)
-    gc.session.mount("https://", _adapter)
-    gc.session.mount("http://", _adapter)
+    gc.http_client.session.mount("https://", _adapter)
+    gc.http_client.session.mount("http://", _adapter)
 except RefreshError as err:
     raise SystemExit(
         "\nПомилка авторизації Google Service Account: invalid_grant (account not found).\n"
