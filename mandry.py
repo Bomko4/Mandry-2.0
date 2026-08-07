@@ -87,6 +87,27 @@ EQUIPMENT_COLUMN_GROUPS = {
 try:
     gc = gspread.service_account(filename=GOOGLE_CREDENTIALS_PATH)
     sh = gc.open(SHEET_NAME)
+
+    # Under concurrent load (multiple people using the mini app / bot at once),
+    # Google Sheets API returns transient 429 (rate limit) / 5xx errors. Every
+    # read/write in this file goes through gc's HTTP session, so mounting a
+    # retry-with-backoff adapter here transparently makes ALL of them resilient
+    # instead of failing outright — this is what caused availability not
+    # showing, booking finalization failing, and "Мої бронювання" missing
+    # entries under multi-user load.
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+
+    _retry = Retry(
+        total=5,
+        backoff_factor=0.6,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=None,  # retry on POST/PUT too — safe here since a 429/5xx means the write never landed
+        respect_retry_after_header=True,
+    )
+    _adapter = HTTPAdapter(max_retries=_retry)
+    gc.session.mount("https://", _adapter)
+    gc.session.mount("http://", _adapter)
 except RefreshError as err:
     raise SystemExit(
         "\nПомилка авторизації Google Service Account: invalid_grant (account not found).\n"
