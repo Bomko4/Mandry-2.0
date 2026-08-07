@@ -142,6 +142,7 @@ const TIME_SLOTS = ["10:15-11:15","11:30-12:30","12:45-13:45","14:00-15:00","15:
 const MORNING_WINDOW = "05:45-08:00";
 const MONTHS = ["січ","лют","бер","кві","тра","чер","лип","сер","вер","жов","лис","гру"];
 const DAYS = ["Нд","Пн","Вт","Ср","Чт","Пт","Сб"];
+let serverClockCache = null;
 
 /* ================= TAB SWITCHING ================= */
 document.querySelectorAll('.nav-btn').forEach(btn=>{
@@ -177,6 +178,8 @@ const dateScroll = document.getElementById('dateScroll');
 // ask the backend what "today" is and anchor everything to that, falling back
 // to the device clock only if the server can't be reached.
 async function getServerToday(){
+  if (serverClockCache?.today) return serverClockCache.todayDate;
+
   if (API_BASE_URL){
     try {
       const res = await fetch(`${API_BASE_URL}/server-time?_=${Date.now()}`, { cache: 'no-store' });
@@ -189,6 +192,7 @@ async function getServerToday(){
           // Handle a Dec/Jan boundary the same way the backend does.
           if (base - now > 300 * 24 * 60 * 60 * 1000) base.setFullYear(base.getFullYear() - 1);
           if (now - base > 300 * 24 * 60 * 60 * 1000) base.setFullYear(base.getFullYear() + 1);
+          serverClockCache = { today: String(data.today || ''), now: String(data.now || ''), todayDate: base };
           return base;
         }
       }
@@ -197,6 +201,24 @@ async function getServerToday(){
     }
   }
   return new Date();
+}
+
+async function getServerClock(){
+  if (serverClockCache?.today && serverClockCache?.now) return serverClockCache;
+  await getServerToday();
+  if (serverClockCache?.today && serverClockCache?.now) return serverClockCache;
+  const now = new Date();
+  const dd = String(now.getDate()).padStart(2, '0');
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mi = String(now.getMinutes()).padStart(2, '0');
+  serverClockCache = { today: `${dd}.${mm}`, now: `${hh}:${mi}`, todayDate: now };
+  return serverClockCache;
+}
+
+async function isMorningClosedForDate(dateStr){
+  const clock = await getServerClock();
+  return clock.today === dateStr && clock.now >= MORNING_WINDOW.split('-')[0];
 }
 
 async function initDateScroll(){
@@ -424,6 +446,10 @@ async function renderTimeSlots(){
   const requestSeq = ++timeSlotsRequestSeq;
   timeGrid.innerHTML = '<div class="col-span-2 text-center text-sm text-gray-400 py-4">Завантаження…</div>';
   slotAvailability = {};
+  if (state.duration === 'morning' && await isMorningClosedForDate(state.date)){
+    timeGrid.innerHTML = '<div class="col-span-2 text-center text-sm text-gray-400 py-4">Ранковий сплав на сьогодні вже недоступний.</div>';
+    return;
+  }
   let summary = await fetchAvailability(state.date, state.duration);
   if (requestSeq !== timeSlotsRequestSeq) return;
 
@@ -578,6 +604,13 @@ async function submitBooking(){
   // letting the app close and the user find out via a chat message later —
   // is what "available in the UI but booking fails" was caused by.
   try {
+    if (state.duration === 'morning' && await isMorningClosedForDate(state.date)){
+      mainBtn.disabled = false;
+      mainBtn.textContent = 'Далі';
+      showWizardNotice('Ранковий сплав на сьогодні вже розпочався або завершився.', true);
+      return;
+    }
+
     const fresh = await fetchAvailability(state.date, state.duration);
     let stillAvailable = false;
     if (state.duration === 'morning'){

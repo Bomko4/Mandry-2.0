@@ -454,6 +454,11 @@ def get_morning_booking_deadline(date_str: str) -> datetime:
     return pre_day.replace(hour=19, minute=0, second=0, microsecond=0)
 
 
+def is_morning_booking_closed(date_str: str) -> bool:
+    morning_start = parse_sheet_date(date_str).replace(hour=5, minute=45, second=0, microsecond=0)
+    return get_current_time() >= morning_start
+
+
 def cancel_morning_finalization_task(date_str: str):
     task = morning_finalization_tasks.pop(date_str, None)
     if task and not task.done():
@@ -711,6 +716,9 @@ async def _build_availability_snapshot(date_str: str, duration_param: str) -> di
 
     if duration_param == "morning":
         if is_weather_blocked_sheet(all_values):
+            return {"closed": True, "available": False, "maxQty": 0}
+
+        if is_morning_booking_closed(date_str):
             return {"closed": True, "available": False, "maxQty": 0}
 
         ensure_morning_table(ws)
@@ -1174,6 +1182,11 @@ async def process_web_app_data(message: types.Message, state: FSMContext):
         if is_morning_weather_blocked(ws):
             await message.answer("На цю дату не плануємо ранковий сплав")
             return
+
+        if is_morning_booking_closed(selected_date):
+            await message.answer("Ранковий сплав на цю дату вже розпочався або завершився.")
+            return
+
         confirmed = is_morning_confirmed(ws)
         past_deadline = get_current_time() >= get_morning_booking_deadline(selected_date)
         if past_deadline and not confirmed:
@@ -1369,6 +1382,12 @@ async def process_morning(callback: types.CallbackQuery, state: FSMContext):
 
             if is_morning_weather_blocked(ws):
                 await callback.message.edit_text("На цю дату не плануємо ранковий сплав")
+                await state.clear()
+                await callback.answer()
+                return
+
+            if is_morning_booking_closed(selected_date):
+                await callback.message.edit_text("Ранковий сплав на цю дату вже розпочався або завершився.")
                 await state.clear()
                 await callback.answer()
                 return
@@ -1659,6 +1678,11 @@ async def finalize_booking(message: types.Message, state: FSMContext, phone: str
     # --- РАНКОВИЙ СПЛАВ ---
     if data.get('morning'):
         try:
+            if is_morning_booking_closed(data['date']):
+                await message.answer("Ранковий сплав на цю дату вже розпочався або завершився.")
+                await state.clear()
+                return
+
             booking_window = MORNING_WINDOW
             actual_equipment = EQUIPMENT_LABELS.get(data.get('equipment'), data.get('equipment'))
 
@@ -1915,6 +1939,9 @@ async def api_availability(request: web.Request) -> web.Response:
 
         if duration_param == "morning":
             if is_weather_blocked_sheet(all_values):
+                return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
+
+            if is_morning_booking_closed(date_str):
                 return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
 
             ensure_morning_table(ws)
