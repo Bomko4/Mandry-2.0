@@ -469,12 +469,15 @@ def cancel_morning_finalization_task(date_str: str):
 morning_booking_chat_ids: dict[str, set[int]] = {}
 
 
-def count_morning_booked_slots(ws) -> int:
-    """Count total occupied (non-empty, non-dash, non-star) cells in the morning data row."""
-    try:
-        all_values = ws.get_all_values()
-    except Exception:
-        return 0
+def count_morning_booked_slots(ws, all_values=None) -> int:
+    """Count total occupied (non-empty, non-dash, non-star) cells in the morning data row.
+    Pass a pre-fetched `all_values` (e.g. ensure_morning_table's return value) to avoid an
+    extra Sheets API round-trip."""
+    if all_values is None:
+        try:
+            all_values = ws.get_all_values()
+        except Exception:
+            return 0
 
     header_row_idx = None
     for r_idx, row in enumerate(all_values):
@@ -497,9 +500,9 @@ def count_morning_booked_slots(ws) -> int:
     return count
 
 
-def is_morning_confirmed(ws) -> bool:
+def is_morning_confirmed(ws, all_values=None) -> bool:
     """True if 6 or more slots are booked in the morning table."""
-    return count_morning_booked_slots(ws) >= 6
+    return count_morning_booked_slots(ws, all_values) >= 6
 
 
 async def finalize_morning_booking_if_needed(date_str: str):
@@ -721,12 +724,11 @@ async def _build_availability_snapshot(date_str: str, duration_param: str) -> di
         if is_morning_booking_closed(date_str):
             return {"closed": True, "available": False, "maxQty": 0}
 
-        ensure_morning_table(ws)
-        refreshed_values = ws.get_all_values()
-        if is_morning_weather_blocked(ws):
+        refreshed_values = ensure_morning_table(ws)
+        if is_morning_weather_blocked(ws, refreshed_values):
             return {"closed": True, "available": False, "maxQty": 0}
 
-        confirmed = is_morning_confirmed(ws)
+        confirmed = is_morning_confirmed(ws, refreshed_values)
         past_deadline = current_time >= get_morning_booking_deadline(date_str)
         if past_deadline and not confirmed:
             return {"closed": True, "available": False, "maxQty": 0}
@@ -930,12 +932,14 @@ def ensure_morning_table(ws) -> list:
     return ws.get_all_values()
 
 
-def is_morning_weather_blocked(ws) -> bool:
-    """Return True if all non-header cells in the morning table are filled with '*'."""
-    try:
-        all_values = ws.get_all_values()
-    except Exception:
-        return False
+def is_morning_weather_blocked(ws, all_values=None) -> bool:
+    """Return True if all non-header cells in the morning table are filled with '*'.
+    Pass a pre-fetched `all_values` to avoid an extra Sheets API round-trip."""
+    if all_values is None:
+        try:
+            all_values = ws.get_all_values()
+        except Exception:
+            return False
 
     header_row_idx = None
     for r_idx, row in enumerate(all_values):
@@ -1178,8 +1182,8 @@ async def process_web_app_data(message: types.Message, state: FSMContext):
     data = {"date": selected_date, "equipment": equipment, "quantity": quantity}
 
     if is_morning:
-        ensure_morning_table(ws)
-        if is_morning_weather_blocked(ws):
+        morning_values = ensure_morning_table(ws)
+        if is_morning_weather_blocked(ws, morning_values):
             await message.answer("На цю дату не плануємо ранковий сплав")
             return
 
@@ -1187,7 +1191,7 @@ async def process_web_app_data(message: types.Message, state: FSMContext):
             await message.answer("Ранковий сплав на цю дату вже розпочався або завершився.")
             return
 
-        confirmed = is_morning_confirmed(ws)
+        confirmed = is_morning_confirmed(ws, morning_values)
         past_deadline = get_current_time() >= get_morning_booking_deadline(selected_date)
         if past_deadline and not confirmed:
             await message.answer("Ранковий сплав на цю дату недоступний: до 19:00 не набралося 6 учасників.")
@@ -1378,9 +1382,9 @@ async def process_morning(callback: types.CallbackQuery, state: FSMContext):
     if selected_date:
         try:
             ws = await get_or_create_sheet(selected_date)
-            ensure_morning_table(ws)
+            morning_values = ensure_morning_table(ws)
 
-            if is_morning_weather_blocked(ws):
+            if is_morning_weather_blocked(ws, morning_values):
                 await callback.message.edit_text("На цю дату не плануємо ранковий сплав")
                 await state.clear()
                 await callback.answer()
@@ -1392,7 +1396,7 @@ async def process_morning(callback: types.CallbackQuery, state: FSMContext):
                 await callback.answer()
                 return
 
-            confirmed = is_morning_confirmed(ws)
+            confirmed = is_morning_confirmed(ws, morning_values)
         except Exception:
             confirmed = False
 
@@ -1944,12 +1948,11 @@ async def api_availability(request: web.Request) -> web.Response:
             if is_morning_booking_closed(date_str):
                 return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
 
-            ensure_morning_table(ws)
-            refreshed_values = ws.get_all_values()
-            if is_morning_weather_blocked(ws):
+            refreshed_values = ensure_morning_table(ws)
+            if is_morning_weather_blocked(ws, refreshed_values):
                 return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
 
-            confirmed = is_morning_confirmed(ws)
+            confirmed = is_morning_confirmed(ws, refreshed_values)
             past_deadline = current_time >= get_morning_booking_deadline(date_str)
             if past_deadline and not confirmed:
                 return web.json_response({"closed": True, "available": False, "maxQty": 0}, headers=headers)
