@@ -163,6 +163,12 @@ switchTab('book');
 let state = { date:null, duration:null, equipment:null, quantity:1, time:null, fullName:'' };
 let step = 1;
 
+function resetBookingSelection(){
+  state.time = null;
+  state.equipment = null;
+  state.quantity = 1;
+}
+
 const dateScroll = document.getElementById('dateScroll');
 
 // The date list used to be built from the visitor's device clock. If a phone's
@@ -233,7 +239,7 @@ async function initDateScroll(){
 }
 initDateScroll();
 document.querySelectorAll('.dur-btn').forEach(btn=>{
-  btn.onclick = () => { selectOne('.dur-btn', btn); state.duration = btn.dataset.val; state.time = null; state.equipment = null; checkStep1(); };
+  btn.onclick = () => { selectOne('.dur-btn', btn); resetBookingSelection(); state.duration = btn.dataset.val; checkStep1(); };
 });
 function checkStep1(){ setMainEnabled(!!state.date && !!state.duration); }
 
@@ -522,8 +528,15 @@ function showStep(n){
   document.getElementById('progressBar').style.width = (n*25)+'%';
   document.getElementById('backBtn').style.visibility = n === 1 ? 'hidden' : 'visible';
   const mainBtn = document.getElementById('mainBtn');
- if (n === 1) setMainEnabled(!!state.date && !!state.duration);
-  if (n === 2) { setMainEnabled(false); renderTimeSlots().then(() => setMainEnabled(!!state.time)); }
+  if (n === 1) setMainEnabled(!!state.date && !!state.duration);
+  if (n === 2) {
+    resetBookingSelection();
+    setMainEnabled(false);
+    renderTimeSlots().catch(error => {
+      console.error('renderTimeSlots failed:', error);
+      timeGrid.innerHTML = '<div class="col-span-2 text-center text-sm text-gray-400 py-4">Не вдалося завантажити доступні години</div>';
+    });
+  }
   if (n === 3) { setMainEnabled(false); buildEquipmentCards(); setMainEnabled(!!state.equipment); }
   if (n === 4) { renderSummary(); setMainEnabled(state.fullName.length > 2); mainBtn.textContent = 'Поділитись номером і забронювати'; }
   else mainBtn.textContent = 'Далі';
