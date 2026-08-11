@@ -723,8 +723,8 @@ def resolve_equipment_booking(requested_equipment: str, all_values, row_idx: int
             return {
                 "resolved_equipment": "sup_double",
                 "equip_col": col,
-                "actual_equipment": "Сап одномісний",
-                "note": "Сап двомісний одна людина",
+                "actual_equipment": "Сап Одномісний",
+                "note": "*",
             }
 
     return None
