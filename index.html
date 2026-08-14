@@ -44,10 +44,9 @@
       <div class="flex items-center justify-between mb-4">
         <button onclick="prevStep()" id="backBtn" class="text-[#0097B2] text-sm font-medium w-16 text-left">‹ Назад</button>
         <div class="flex-1 flex justify-center">
-          <!-- Великий логотип із заокругленими краями -->
           <img src="logo.jpg" alt="Mandry SUP" class="h-14 w-auto object-contain bg-white rounded-2xl shadow-sm">
         </div>
-        <div class="w-16"></div> <!-- Пустий блок для балансу центрування -->
+        <div class="w-16"></div> 
       </div>
       <div class="text-[11px] text-[#0097B2]/70 font-medium mb-1 text-center" id="stepLabel">Крок 1 з 4</div>
       <div class="h-1.5 bg-cyan-100 rounded-full overflow-hidden mb-2">
@@ -55,16 +54,16 @@
       </div>
     </div>
 
-    <!-- Область прокрутки контенту (збільшено pb-36 щоб кнопка не перекривала контент) -->
-    <div class="flex-1 px-4 pb-36 overflow-y-auto">
+    <!-- Область прокрутки контенту -->
+    <div class="flex-1 px-4 pb-32 overflow-y-auto">
       <section id="step1" class="step">
         <h2 class="text-xl font-bold mt-2 mb-3 text-[#006477]">Оберіть дату</h2>
         <div id="dateScroll" class="flex gap-2 overflow-x-auto noscroll pb-2 mb-6"></div>
         <h2 class="text-xl font-bold mb-3 text-[#006477]">Тривалість</h2>
         <div class="flex flex-col gap-2" id="durationList">
-          <button data-val="1" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium transition-colors hover:border-cyan-100">1 година</button>
-          <button data-val="2" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium transition-colors hover:border-cyan-100">2 години</button>
-          <button data-val="morning" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium transition-colors hover:border-cyan-100">Сплав на світанку</button>
+          <button data-val="1" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium transition-colors">1 година</button>
+          <button data-val="2" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium transition-colors">2 години</button>
+          <button data-val="morning" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium transition-colors">Сплав на світанку</button>
         </div>
       </section>
 
@@ -90,16 +89,16 @@
       </section>
     </div>
 
-    <div class="absolute bottom-16 left-0 right-0 p-4 z-20">
+    <!-- Кнопка "Далі" (зроблена fixed, щоб завжди бути поверх контенту знизу) -->
+    <div class="fixed bottom-[68px] left-0 right-0 max-w-md mx-auto p-4 z-20 pointer-events-none">
       <button id="mainBtn" onclick="nextStep()" disabled
-        class="w-full bg-[#0097B2] disabled:bg-gray-300 text-white font-semibold py-3.5 rounded-2xl shadow-lg shadow-cyan-500/30 transition">Далі</button>
+        class="pointer-events-auto w-full bg-[#0097B2] disabled:bg-gray-300 text-white font-semibold py-3.5 rounded-2xl shadow-lg shadow-cyan-500/30 transition">Далі</button>
     </div>
   </div>
 
   <!-- ============ TAB: MY BOOKINGS ============ -->
   <div id="tab-bookings" class="tab-panel hidden flex-1 flex-col content-layer">
     <div class="px-4 pt-4 pb-2 z-10 flex justify-center bg-transparent">
-      <!-- Великий логотип із заокругленими краями -->
       <img src="logo.jpg" alt="Mandry SUP" class="h-14 w-auto object-contain bg-white rounded-2xl shadow-sm">
     </div>
     <div class="flex-1 px-4 pb-20 overflow-y-auto">
@@ -129,7 +128,6 @@
   <!-- ============ TAB: ABOUT ============ -->
   <div id="tab-about" class="tab-panel hidden flex-1 flex-col content-layer">
     <div class="px-4 pt-4 pb-2 z-10 flex justify-center bg-transparent">
-      <!-- Великий логотип із заокругленими краями -->
       <img src="logo.jpg" alt="Mandry SUP" class="h-14 w-auto object-contain bg-white rounded-2xl shadow-sm">
     </div>
     
@@ -246,14 +244,13 @@ async function initDateScroll(){
   const today = await getServerToday();
   dateScroll.innerHTML = '';
   
-  // Генеруємо список дат
   for (let i=0;i<28;i++){
     const d = new Date(today); d.setDate(d.getDate()+i);
     const isWeekend = d.getDay() === 0 || d.getDay() === 6;
     const isToday = i === 0;
     
     const btn = document.createElement('button');
-    btn.className = 'date-btn flex-shrink-0 w-16 py-2.5 rounded-2xl bg-white border-2 border-transparent shadow-sm text-center transition-colors hover:border-cyan-100';
+    btn.className = 'date-btn flex-shrink-0 w-16 py-2.5 rounded-2xl bg-white border-2 border-transparent shadow-sm text-center transition-colors';
     
     const dd = String(d.getDate()).padStart(2,'0');
     const mm = String(d.getMonth()+1).padStart(2,'0');
@@ -289,8 +286,7 @@ async function initDateScroll(){
     }
   }
 
-  // АВТОМАТИЧНИЙ ВИБІР ДАТИ
-  // Після перевірки доступних днів клікаємо на першу доступну дату (сьогодні)
+  // Автоматичний вибір першої доступної дати (зазвичай сьогодні)
   const firstAvailableBtn = Array.from(document.querySelectorAll('.date-btn')).find(b => !b.disabled);
   if (firstAvailableBtn) {
     firstAvailableBtn.click();
@@ -331,7 +327,7 @@ function buildEquipmentCard(item, container){
   const card = document.createElement('div');
   
   card.className = 'eq-card flex-shrink-0 w-40 bg-white rounded-2xl shadow-sm overflow-hidden border-2 border-transparent transition-colors '
-    + (disabled ? ' opacity-40' : ' cursor-pointer hover:border-cyan-100');
+    + (disabled ? ' opacity-40' : ' cursor-pointer');
     
   card.innerHTML = `
     <div class="h-24 bg-[#EAF8FA]/50 flex items-center justify-center text-4xl">${item.img}</div>
@@ -340,9 +336,9 @@ function buildEquipmentCard(item, container){
       <div class="text-xs text-[#0097B2] font-medium mb-2 price-line" data-price1h="${item.price1h}" data-price2h="${item.price2h}">${item.price1h}</div>
       ${disabled ? `<div class="text-[10px] text-red-400 text-center">Немає в наявності на цей час</div>` :
         (showQty ? `<div class="flex items-center justify-between bg-cyan-50/50 rounded-xl px-1 py-1">
-          <button class="qty-minus w-7 h-7 rounded-lg bg-white shadow-sm font-bold text-[#0097B2] hover:bg-cyan-50">−</button>
+          <button class="qty-minus w-7 h-7 rounded-lg bg-white shadow-sm font-bold text-[#0097B2]">−</button>
           <span class="qty-val text-sm font-semibold text-gray-800">1</span>
-          <button class="qty-plus w-7 h-7 rounded-lg bg-white shadow-sm font-bold text-[#0097B2] hover:bg-cyan-50">+</button>
+          <button class="qty-plus w-7 h-7 rounded-lg bg-white shadow-sm font-bold text-[#0097B2]">+</button>
         </div>` : '')}
     </div>`;
   container.appendChild(card);
@@ -505,7 +501,7 @@ async function renderTimeSlots(){
     const isSelectable = !summary.closed && (summary.maxQty || 0) > 0;
     const btn = document.createElement('button');
     btn.className = 'time-btn col-span-2 py-3 rounded-2xl border-2 border-transparent shadow-sm font-medium transition-colors '
-      + (isSelectable ? 'bg-white hover:border-cyan-100' : 'bg-gray-100 text-gray-300 cursor-not-allowed');
+      + (isSelectable ? 'bg-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed');
     btn.textContent = MORNING_WINDOW;
     btn.disabled = !isSelectable;
     if (isSelectable){
@@ -542,7 +538,7 @@ async function renderTimeSlots(){
     const isSelectable = (slot.maxQty || 0) > 0;
     const btn = document.createElement('button');
     btn.className = 'time-btn py-3 rounded-2xl border-2 border-transparent shadow-sm font-medium text-sm transition-colors '
-      + (isSelectable ? 'bg-white hover:border-cyan-100' : 'bg-gray-100 text-gray-300 cursor-not-allowed');
+      + (isSelectable ? 'bg-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed');
     btn.textContent = label;
     btn.disabled = !isSelectable;
     if (isSelectable){
@@ -572,10 +568,14 @@ function renderSummary(){
     <div class="flex justify-between"><span>Час</span><span class="font-medium text-[#006477]">${state.time}</span></div>`;
 }
 
-// Функція оновлена: додає темно-бірюзовий колір обведення #005263
+// Оновлена функція: повністю видаляє старі стилі і застосовує нові одразу
 function selectOne(selector, active){
-  document.querySelectorAll(selector).forEach(el => el.classList.remove('border-[#005263]'));
-  active.classList.add('border-[#005263]');
+  document.querySelectorAll(selector).forEach(el => {
+    el.classList.remove('border-[#008198]', 'bg-cyan-50');
+    el.classList.add('border-transparent');
+  });
+  active.classList.remove('border-transparent');
+  active.classList.add('border-[#008198]', 'bg-cyan-50');
 }
 
 function setMainEnabled(ok){ document.getElementById('mainBtn').disabled = !ok; }
