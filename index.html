@@ -16,16 +16,15 @@
     width: 200%;
     height: 200%;
     background-image: url('logo.jpg');
-    background-size: 140px; /* Розмір однієї монограми */
+    background-size: 140px;
     background-repeat: repeat;
-    opacity: 0.04; /* Ледь помітний патерн */
-    mix-blend-mode: multiply; /* Прибирає білий фон з JPG */
-    transform: rotate(-20deg); /* Нахил для стильнішого вигляду */
+    opacity: 0.04; 
+    mix-blend-mode: multiply; 
+    transform: rotate(-20deg); 
     pointer-events: none;
     z-index: 0;
   }
   
-  /* Щоб контент був поверх фону */
   .content-layer {
     position: relative;
     z-index: 10;
@@ -40,21 +39,23 @@
 
   <!-- ============ TAB: BOOK ============ -->
   <div id="tab-book" class="tab-panel flex flex-col flex-1 content-layer">
-    <div class="sticky top-0 bg-[#EAF8FA]/95 backdrop-blur px-4 pt-3 pb-2 z-20">
-      <div class="flex items-center justify-between mb-2">
+    <!-- Верхня панель (тепер прозора, щоб було видно патерн) -->
+    <div class="px-4 pt-4 pb-2 z-20 bg-transparent">
+      <div class="flex items-center justify-between mb-4">
         <button onclick="prevStep()" id="backBtn" class="text-[#0097B2] text-sm font-medium w-16 text-left">‹ Назад</button>
         <div class="flex-1 flex justify-center">
-          <!-- Логотип замість тексту -->
-          <img src="logo.jpg" alt="Mandry SUP" class="h-7 object-contain mix-blend-multiply opacity-90">
+          <!-- Великий логотип із заокругленими краями -->
+          <img src="logo.jpg" alt="Mandry SUP" class="h-14 w-auto object-contain bg-white rounded-2xl shadow-sm">
         </div>
         <div class="w-16"></div> <!-- Пустий блок для балансу центрування -->
       </div>
       <div class="text-[11px] text-[#0097B2]/70 font-medium mb-1 text-center" id="stepLabel">Крок 1 з 4</div>
-      <div class="h-1.5 bg-cyan-100 rounded-full overflow-hidden">
+      <div class="h-1.5 bg-cyan-100 rounded-full overflow-hidden mb-2">
         <div id="progressBar" class="h-full bg-[#0097B2] rounded-full transition-all" style="width:25%"></div>
       </div>
     </div>
 
+    <!-- Область прокрутки контенту -->
     <div class="flex-1 px-4 pb-24 overflow-y-auto">
       <section id="step1" class="step">
         <h2 class="text-xl font-bold mt-2 mb-3 text-[#006477]">Оберіть дату</h2>
@@ -96,12 +97,12 @@
   </div>
 
   <!-- ============ TAB: MY BOOKINGS ============ -->
-  <div id="tab-bookings" class="tab-panel hidden flex-1 overflow-y-auto content-layer">
-    <div class="sticky top-0 bg-[#EAF8FA]/95 backdrop-blur px-4 pt-3 pb-3 z-10 flex justify-center border-b border-cyan-100/30">
-      <!-- Логотип замість тексту -->
-      <img src="logo.jpg" alt="Mandry SUP" class="h-7 object-contain mix-blend-multiply opacity-90">
+  <div id="tab-bookings" class="tab-panel hidden flex-1 flex-col content-layer">
+    <div class="px-4 pt-4 pb-2 z-10 flex justify-center bg-transparent">
+      <!-- Великий логотип із заокругленими краями -->
+      <img src="logo.jpg" alt="Mandry SUP" class="h-14 w-auto object-contain bg-white rounded-2xl shadow-sm">
     </div>
-    <div class="px-4 pb-20">
+    <div class="flex-1 px-4 pb-20 overflow-y-auto">
       <div class="pt-4 pb-3">
         <div class="text-xl font-bold text-[#006477]">Мої бронювання</div>
       </div>
@@ -126,14 +127,14 @@
   </div>
 
   <!-- ============ TAB: ABOUT ============ -->
-  <div id="tab-about" class="tab-panel hidden flex-1 overflow-y-auto content-layer">
-    <div class="sticky top-0 bg-[#EAF8FA]/95 backdrop-blur px-4 pt-3 pb-3 z-10 flex justify-center border-b border-cyan-100/30 mb-4">
-      <!-- Логотип замість тексту -->
-      <img src="logo.jpg" alt="Mandry SUP" class="h-7 object-contain mix-blend-multiply opacity-90">
+  <div id="tab-about" class="tab-panel hidden flex-1 flex-col content-layer">
+    <div class="px-4 pt-4 pb-2 z-10 flex justify-center bg-transparent">
+      <!-- Великий логотип із заокругленими краями -->
+      <img src="logo.jpg" alt="Mandry SUP" class="h-14 w-auto object-contain bg-white rounded-2xl shadow-sm">
     </div>
     
-    <div class="px-4 pb-20">
-      <div class="pt-2 pb-3">
+    <div class="flex-1 px-4 pb-20 overflow-y-auto">
+      <div class="pt-4 pb-3">
         <div class="text-xl font-bold text-[#006477] text-center">Інформація</div>
       </div>
 
