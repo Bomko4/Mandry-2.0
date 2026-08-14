@@ -5,91 +5,118 @@
 <title>Mandry SUP</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
-<style>body{-webkit-tap-highlight-color:transparent}.noscroll::-webkit-scrollbar{display:none}.noscroll{-ms-overflow-style:none;scrollbar-width:none}</style>
+<style>
+  body{-webkit-tap-highlight-color:transparent}.noscroll::-webkit-scrollbar{display:none}.noscroll{-ms-overflow-style:none;scrollbar-width:none}
+  /* Водяний знак для фону */
+  .brand-bg {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 150%;
+    height: 100vh;
+    background-image: url('logo.jpg');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    opacity: 0.05; /* Ледь помітний логотип на фоні */
+    mix-blend-mode: multiply; /* Прибирає білий фон з JPG */
+    pointer-events: none;
+    z-index: 0;
+  }
+  /* Щоб контент був поверх фону */
+  .content-layer {
+    position: relative;
+    z-index: 10;
+  }
+</style>
 </head>
-<body class="bg-gray-100 min-h-screen font-sans text-gray-900">
-<div id="app" class="max-w-md mx-auto min-h-screen bg-gray-100 flex flex-col relative">
+<body class="bg-[#EAF8FA] min-h-screen font-sans text-gray-900">
+<div id="app" class="max-w-md mx-auto min-h-screen bg-[#EAF8FA] flex flex-col relative overflow-hidden">
+  
+  <!-- Задній фон з логотипом -->
+  <div class="brand-bg"></div>
 
   <!-- ============ TAB: BOOK ============ -->
-  <div id="tab-book" class="tab-panel flex flex-col flex-1">
-    <div class="sticky top-0 bg-gray-100/95 backdrop-blur px-4 pt-3 pb-2 z-10">
+  <div id="tab-book" class="tab-panel flex flex-col flex-1 content-layer">
+    <div class="sticky top-0 bg-[#EAF8FA]/95 backdrop-blur px-4 pt-3 pb-2 z-20">
       <div class="flex items-center justify-between mb-2">
-        <button onclick="prevStep()" id="backBtn" class="text-blue-600 text-sm font-medium">‹ Назад</button>
+        <button onclick="prevStep()" id="backBtn" class="text-[#0097B2] text-sm font-medium">‹ Назад</button>
         <div class="text-center">
-          <div class="text-[15px] font-semibold">MandryBooking2.0</div>
-          <div class="text-[11px] text-gray-400">mini app</div>
+          <div class="text-[15px] font-semibold text-[#007b91]">MandryBooking2.0</div>
+          <div class="text-[11px] text-[#0097B2]/70">mini app</div>
         </div>
         <div class="w-10"></div>
       </div>
       <div class="text-[11px] text-gray-400 mb-1" id="stepLabel">Крок 1 з 4</div>
-      <div class="h-1.5 bg-gray-200 rounded-full overflow-hidden">
-        <div id="progressBar" class="h-full bg-blue-600 rounded-full transition-all" style="width:25%"></div>
+      <div class="h-1.5 bg-cyan-100 rounded-full overflow-hidden">
+        <div id="progressBar" class="h-full bg-[#0097B2] rounded-full transition-all" style="width:25%"></div>
       </div>
     </div>
 
     <div class="flex-1 px-4 pb-24 overflow-y-auto">
       <section id="step1" class="step">
-        <h2 class="text-xl font-bold mt-2 mb-3">Оберіть дату</h2>
+        <h2 class="text-xl font-bold mt-2 mb-3 text-[#006477]">Оберіть дату</h2>
         <div id="dateScroll" class="flex gap-2 overflow-x-auto noscroll pb-2 mb-6"></div>
-        <h2 class="text-xl font-bold mb-3">Тривалість</h2>
+        <h2 class="text-xl font-bold mb-3 text-[#006477]">Тривалість</h2>
         <div class="flex flex-col gap-2" id="durationList">
-          <button data-val="1" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium">1 година</button>
-          <button data-val="2" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium">2 години</button>
-          <button data-val="morning" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium">Сплав на світанку</button>
+          <button data-val="1" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium transition-colors hover:border-cyan-100">1 година</button>
+          <button data-val="2" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium transition-colors hover:border-cyan-100">2 години</button>
+          <button data-val="morning" class="dur-btn text-left px-4 py-3 rounded-2xl bg-white border-2 border-transparent shadow-sm font-medium transition-colors hover:border-cyan-100">Сплав на світанку</button>
         </div>
       </section>
 
       <section id="step2" class="step hidden">
-        <h2 class="text-xl font-bold mt-2 mb-3">Оберіть час</h2>
+        <h2 class="text-xl font-bold mt-2 mb-3 text-[#006477]">Оберіть час</h2>
         <div id="timeGrid" class="grid grid-cols-2 gap-2"></div>
       </section>
 
       <section id="step3" class="step hidden">
-        <h2 class="text-xl font-bold mt-2 mb-3">Сапи</h2>
+        <h2 class="text-xl font-bold mt-2 mb-3 text-[#006477]">Сапи</h2>
         <div class="flex justify-center gap-3 overflow-x-auto noscroll pb-2 mb-6" id="supScroll"></div>
-        <h2 class="text-xl font-bold mb-3">Каяки</h2>
+        <h2 class="text-xl font-bold mb-3 text-[#006477]">Каяки</h2>
         <div class="flex justify-center gap-3 overflow-x-auto noscroll pb-2 mb-6" id="kayakScroll"></div>
       </section>
 
       <section id="step4" class="step hidden">
-        <h2 class="text-xl font-bold mt-2 mb-4">Ваші дані</h2>
-        <div class="bg-white rounded-2xl p-4 shadow-sm mb-4">
+        <h2 class="text-xl font-bold mt-2 mb-4 text-[#006477]">Ваші дані</h2>
+        <div class="bg-white rounded-2xl p-4 shadow-sm mb-4 border border-cyan-50">
           <label class="text-xs text-gray-400">Ім'я та прізвище</label>
-          <input id="fullName" type="text" placeholder="Іван Петренко" class="w-full mt-1 text-base outline-none placeholder-gray-300">
+          <input id="fullName" type="text" placeholder="Іван Петренко" class="w-full mt-1 text-base outline-none placeholder-gray-300 bg-transparent">
         </div>
-        <div id="summaryBox" class="bg-white rounded-2xl p-4 shadow-sm text-sm space-y-1 text-gray-600"></div>
+        <div id="summaryBox" class="bg-white rounded-2xl p-4 shadow-sm text-sm space-y-1 text-gray-600 border border-cyan-50"></div>
       </section>
     </div>
 
-    <div class="absolute bottom-16 left-0 right-0 p-4">
+    <div class="absolute bottom-16 left-0 right-0 p-4 z-20">
       <button id="mainBtn" onclick="nextStep()" disabled
-        class="w-full bg-blue-600 disabled:bg-gray-300 text-white font-semibold py-3.5 rounded-2xl transition">Далі</button>
+        class="w-full bg-[#0097B2] disabled:bg-gray-300 text-white font-semibold py-3.5 rounded-2xl shadow-lg shadow-cyan-500/30 transition">Далі</button>
     </div>
   </div>
 
   <!-- ============ TAB: MY BOOKINGS ============ -->
-  <div id="tab-bookings" class="tab-panel hidden flex-1 overflow-y-auto">
-    <div class="sticky top-0 bg-gray-100/95 backdrop-blur px-4 pt-3 pb-2 z-10 text-center">
-      <div class="text-[15px] font-semibold">MandryBooking2.0</div>
-      <div class="text-[11px] text-gray-400">mini app</div>
+  <div id="tab-bookings" class="tab-panel hidden flex-1 overflow-y-auto content-layer">
+    <div class="sticky top-0 bg-[#EAF8FA]/95 backdrop-blur px-4 pt-3 pb-2 z-10 text-center">
+      <div class="text-[15px] font-semibold text-[#007b91]">MandryBooking2.0</div>
+      <div class="text-[11px] text-[#0097B2]/70">mini app</div>
     </div>
     <div class="px-4 pb-20">
       <div class="pt-4 pb-3">
-        <div class="text-xl font-bold">Мої бронювання</div>
+        <div class="text-xl font-bold text-[#006477]">Мої бронювання</div>
       </div>
-      <div id="bookingSearchBox" class="bg-white rounded-2xl p-4 shadow-sm mb-4">
-        <button id="bookingShareBtn" class="w-full bg-blue-600 text-white font-semibold py-3.5 rounded-2xl">
+      <div id="bookingSearchBox" class="bg-white rounded-2xl p-4 shadow-sm mb-4 border border-cyan-50">
+        <button id="bookingShareBtn" class="w-full bg-[#0097B2] text-white font-semibold py-3.5 rounded-2xl shadow-md shadow-cyan-500/20">
           Поділитися номером
         </button>
         <div class="flex items-center gap-2 my-3">
-          <div class="h-px bg-gray-100 flex-1"></div>
+          <div class="h-px bg-cyan-100 flex-1"></div>
           <div class="text-[11px] text-gray-300">або</div>
-          <div class="h-px bg-gray-100 flex-1"></div>
+          <div class="h-px bg-cyan-100 flex-1"></div>
         </div>
         <div class="flex gap-2">
           <input id="bookingPhoneInput" type="tel" inputmode="tel" placeholder="0989055753"
-            class="flex-1 min-w-0 bg-gray-50 rounded-xl px-3 py-2.5 text-sm outline-none placeholder-gray-300">
-          <button id="bookingPhoneSearchBtn" class="bg-gray-100 text-gray-700 font-semibold px-4 rounded-xl text-sm">Знайти</button>
+            class="flex-1 min-w-0 bg-cyan-50/50 rounded-xl px-3 py-2.5 text-sm outline-none placeholder-gray-300 border border-transparent focus:border-cyan-200">
+          <button id="bookingPhoneSearchBtn" class="bg-cyan-50 text-[#0097B2] font-semibold px-4 rounded-xl text-sm transition hover:bg-cyan-100">Знайти</button>
         </div>
         <div id="bookingSearchHint" class="text-xs text-gray-400 mt-2"></div>
       </div>
@@ -98,24 +125,24 @@
   </div>
 
   <!-- ============ TAB: ABOUT ============ -->
-  <div id="tab-about" class="tab-panel hidden flex-1 overflow-y-auto">
-    <div class="text-center">
-      <img src="logo.jpg" alt="Mandry SUP" class="h-10 mx-auto object-contain">
+  <div id="tab-about" class="tab-panel hidden flex-1 overflow-y-auto content-layer">
+    <div class="text-center mt-6 mb-2">
+      <img src="logo.jpg" alt="Mandry SUP" class="h-16 mx-auto object-contain rounded-xl mix-blend-multiply">
     </div>
     <div class="px-4 pb-20">
-      <div class="pt-4 pb-3">
-        <div class="text-xl font-bold">Інформація</div>
+      <div class="pt-2 pb-3">
+        <div class="text-xl font-bold text-[#006477] text-center">Інформація</div>
       </div>
 
       <a href="https://mandry-sup.choiceqr.com/menu" target="_blank"
-         class="block w-full bg-blue-600 text-white text-center font-semibold py-3.5 rounded-2xl mb-4">🍽️ Меню</a>
+         class="block w-full bg-[#0097B2] text-white text-center font-semibold py-3.5 rounded-2xl mb-4 shadow-md shadow-cyan-500/20">🍽️ Меню</a>
 
       <div class="flex flex-col gap-2" id="accordions"></div>
     </div>
   </div>
 
   <!-- ============ BOTTOM NAV ============ -->
-  <div class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-gray-200 flex">
+  <div class="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white border-t border-cyan-100 flex z-30 pb-safe">
     <button class="nav-btn flex-1 py-2.5 flex flex-col items-center gap-0.5" data-tab="book">
       <span class="text-xl">🛶</span><span class="text-[11px] font-medium">Забронювати</span>
     </button>
@@ -133,8 +160,7 @@
 const tg = window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
 
-// Set this to your bot server's HTTPS API URL, e.g. "https://mandrysup.duckdns.org/api"
-// (must be HTTPS — a Mini App served over HTTPS cannot call an http:// endpoint).
+// Якщо у вас буде файл bg_pattern.png (прозорий), можете додати його в CSS .brand-bg
 const API_BASE_URL = "https://mandrysup.duckdns.org/api";
 
 const TIME_SLOTS = ["10:15-11:15","11:30-12:30","12:45-13:45","14:00-15:00","15:15-16:15","16:30-17:30","17:45-18:45","19:00-20:00","20:10-21:10"];
@@ -152,7 +178,7 @@ function switchTab(name){
   document.getElementById('tab-'+name).classList.remove('hidden');
   document.querySelectorAll('.nav-btn').forEach(b=>{
     const active = b.dataset.tab === name;
-    b.classList.toggle('text-blue-600', active);
+    b.classList.toggle('text-[#0097B2]', active);
     b.classList.toggle('text-gray-400', !active);
   });
   if (name === 'bookings') renderBookings();
@@ -171,14 +197,8 @@ function resetBookingSelection(){
 
 const dateScroll = document.getElementById('dateScroll');
 
-// The date list used to be built from the visitor's device clock. If a phone's
-// timezone/clock disagrees with the server's (Europe/Kyiv), dates could look
-// bookable when the server considers them already past, or vice versa. We now
-// ask the backend what "today" is and anchor everything to that, falling back
-// to the device clock only if the server can't be reached.
 async function getServerToday(){
   if (serverClockCache?.today) return serverClockCache.todayDate;
-
   if (API_BASE_URL){
     try {
       const res = await fetch(`${API_BASE_URL}/server-time?_=${Date.now()}`, { cache: 'no-store' });
@@ -188,7 +208,6 @@ async function getServerToday(){
         if (dd && mm){
           const now = new Date();
           let base = new Date(now.getFullYear(), mm - 1, dd);
-          // Handle a Dec/Jan boundary the same way the backend does.
           if (base - now > 300 * 24 * 60 * 60 * 1000) base.setFullYear(base.getFullYear() - 1);
           if (now - base > 300 * 24 * 60 * 60 * 1000) base.setFullYear(base.getFullYear() + 1);
           serverClockCache = { today: String(data.today || ''), now: String(data.now || ''), todayDate: base };
@@ -228,14 +247,14 @@ async function initDateScroll(){
     const isWeekend = d.getDay() === 0 || d.getDay() === 6;
     const isToday = i === 0;
     const btn = document.createElement('button');
-    btn.className = 'date-btn flex-shrink-0 w-16 py-2.5 rounded-2xl bg-white border-2 shadow-sm text-center '
-      + (isToday ? 'border-blue-600' : 'border-transparent');
+    btn.className = 'date-btn flex-shrink-0 w-16 py-2.5 rounded-2xl bg-white border-2 shadow-sm text-center transition-colors '
+      + (isToday ? 'border-[#0097B2]' : 'border-transparent hover:border-cyan-100');
     const dd = String(d.getDate()).padStart(2,'0');
     const mm = String(d.getMonth()+1).padStart(2,'0');
     btn.dataset.val = `${dd}.${mm}`;
-    const dayColor = isWeekend ? 'text-blue-600 font-bold' : 'text-gray-400';
-    const numColor = isWeekend ? 'text-blue-600' : '';
-    btn.innerHTML = `<div class="text-[11px] ${dayColor}">${DAYS[d.getDay()]}</div><div class="text-lg font-bold leading-tight ${numColor}">${d.getDate()}</div><div class="text-[11px] text-gray-400">${MONTHS[d.getMonth()]}</div>${isToday ? '<div class="text-[9px] text-blue-600 font-semibold mt-0.5">сьогодні</div>' : ''}`;
+    const dayColor = isWeekend ? 'text-[#0097B2] font-bold' : 'text-gray-400';
+    const numColor = isWeekend ? 'text-[#0097B2]' : 'text-gray-800';
+    btn.innerHTML = `<div class="text-[11px] ${dayColor}">${DAYS[d.getDay()]}</div><div class="text-lg font-bold leading-tight ${numColor}">${d.getDate()}</div><div class="text-[11px] text-gray-400">${MONTHS[d.getMonth()]}</div>${isToday ? '<div class="text-[9px] text-[#0097B2] font-semibold mt-0.5">сьогодні</div>' : ''}`;
     btn.onclick = () => { selectOne('.date-btn', btn); state.date = btn.dataset.val; state.time = null; state.equipment = null; checkStep1(); };
     dateScroll.appendChild(btn);
   }
@@ -276,7 +295,6 @@ const ALL_EQUIPMENT_IDS = ['sup_single','sup_double','kayak_single','kayak_doubl
 const supScroll = document.getElementById('supScroll');
 const kayakScroll = document.getElementById('kayakScroll');
 
-// { equipmentId: { slotStart: maxQty } }, populated by renderTimeSlots() for the chosen date/duration
 let slotAvailability = {};
 
 function currentSlotStart(){
@@ -289,18 +307,18 @@ function buildEquipmentCard(item, container){
   const disabled = maxQty === 0;
   const showQty = item.id.startsWith('sup_');
   const card = document.createElement('div');
-  card.className = 'eq-card flex-shrink-0 w-40 bg-white rounded-2xl shadow-sm overflow-hidden border-2 border-transparent'
-    + (disabled ? ' opacity-40' : ' cursor-pointer');
+  card.className = 'eq-card flex-shrink-0 w-40 bg-white rounded-2xl shadow-sm overflow-hidden border-2 border-transparent transition-colors '
+    + (disabled ? ' opacity-40' : ' cursor-pointer hover:border-cyan-100');
   card.innerHTML = `
-    <div class="h-24 bg-gray-100 flex items-center justify-center text-4xl">${item.img}</div>
+    <div class="h-24 bg-[#EAF8FA]/50 flex items-center justify-center text-4xl">${item.img}</div>
     <div class="p-3">
-      <div class="font-semibold text-sm mb-1">${item.title}</div>
-      <div class="text-xs text-gray-400 mb-2 price-line" data-price1h="${item.price1h}" data-price2h="${item.price2h}">${item.price1h}</div>
-      ${disabled ? `<div class="text-[10px] text-red-500 text-center">Немає в наявності на цей час</div>` :
-        (showQty ? `<div class="flex items-center justify-between bg-gray-50 rounded-xl px-1 py-1">
-          <button class="qty-minus w-7 h-7 rounded-lg bg-white shadow-sm font-bold text-blue-600">−</button>
-          <span class="qty-val text-sm font-semibold">1</span>
-          <button class="qty-plus w-7 h-7 rounded-lg bg-white shadow-sm font-bold text-blue-600">+</button>
+      <div class="font-semibold text-[#006477] text-sm mb-1">${item.title}</div>
+      <div class="text-xs text-[#0097B2] font-medium mb-2 price-line" data-price1h="${item.price1h}" data-price2h="${item.price2h}">${item.price1h}</div>
+      ${disabled ? `<div class="text-[10px] text-red-400 text-center">Немає в наявності на цей час</div>` :
+        (showQty ? `<div class="flex items-center justify-between bg-cyan-50/50 rounded-xl px-1 py-1">
+          <button class="qty-minus w-7 h-7 rounded-lg bg-white shadow-sm font-bold text-[#0097B2] hover:bg-cyan-50">−</button>
+          <span class="qty-val text-sm font-semibold text-gray-800">1</span>
+          <button class="qty-plus w-7 h-7 rounded-lg bg-white shadow-sm font-bold text-[#0097B2] hover:bg-cyan-50">+</button>
         </div>` : '')}
     </div>`;
   container.appendChild(card);
@@ -362,10 +380,8 @@ function addMinutesToTime(hhmm, minutesToAdd){
 
 async function fetchAvailability(date, duration){
   if (!API_BASE_URL){
-    console.warn('API_BASE_URL is not set — availability cannot be checked, all slots will show as unavailable.');
     return duration === 'morning' ? { closed: true, available: false, maxQty: 0 } : { closed: true, slots: [] };
   }
-
   try {
     const res = await fetch(`${API_BASE_URL}/availability?date=${encodeURIComponent(date)}&equipment=all&duration=${encodeURIComponent(duration)}&_=${Date.now()}`, { cache: 'no-store' });
     if (!res.ok) throw new Error('bad response');
@@ -384,7 +400,6 @@ async function fetchDayClosed(date){
     const data = await res.json();
     return !!data[date];
   } catch (error) {
-    console.error('fetchDayClosed failed:', error);
     return false;
   }
 }
@@ -400,7 +415,6 @@ async function fetchDetailedAvailability(date, duration){
         if (!res.ok) throw new Error('bad response');
         return { id, data: await res.json() };
       } catch (error) {
-        console.error('fetchDetailedAvailability failed for', id, error);
         return { id, data: duration === 'morning' ? { closed: true, available: false, maxQty: 0 } : { closed: true, slots: [] } };
       }
     })
@@ -414,13 +428,7 @@ async function fetchDetailedAvailability(date, duration){
       availableByEquipment[id] = qty;
       if (qty > maxQty) maxQty = qty;
     });
-    return {
-      closed: false,
-      morning: true,
-      available: maxQty > 0,
-      maxQty,
-      availableByEquipment,
-    };
+    return { closed: false, morning: true, available: maxQty > 0, maxQty, availableByEquipment };
   }
 
   const slotsMap = new Map();
@@ -443,7 +451,7 @@ async function fetchDetailedAvailability(date, duration){
 
 async function renderTimeSlots(){
   const requestSeq = ++timeSlotsRequestSeq;
-  timeGrid.innerHTML = '<div class="col-span-2 text-center text-sm text-gray-400 py-4">Завантаження…</div>';
+  timeGrid.innerHTML = '<div class="col-span-2 text-center text-sm text-[#0097B2] py-4">Завантаження…</div>';
   slotAvailability = {};
   if (state.duration === 'morning' && await isMorningClosedForDate(state.date)){
     timeGrid.innerHTML = '<div class="col-span-2 text-center text-sm text-gray-400 py-4">Ранковий сплав на сьогодні вже недоступний.</div>';
@@ -472,8 +480,8 @@ async function renderTimeSlots(){
     });
     const isSelectable = !summary.closed && (summary.maxQty || 0) > 0;
     const btn = document.createElement('button');
-    btn.className = 'time-btn col-span-2 py-3 rounded-2xl border-2 border-transparent shadow-sm font-medium '
-      + (isSelectable ? 'bg-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed');
+    btn.className = 'time-btn col-span-2 py-3 rounded-2xl border-2 border-transparent shadow-sm font-medium transition-colors '
+      + (isSelectable ? 'bg-white hover:border-cyan-100' : 'bg-gray-100 text-gray-300 cursor-not-allowed');
     btn.textContent = MORNING_WINDOW;
     btn.disabled = !isSelectable;
     if (isSelectable){
@@ -509,8 +517,8 @@ async function renderTimeSlots(){
 
     const isSelectable = (slot.maxQty || 0) > 0;
     const btn = document.createElement('button');
-    btn.className = 'time-btn py-3 rounded-2xl border-2 border-transparent shadow-sm font-medium text-sm '
-      + (isSelectable ? 'bg-white' : 'bg-gray-100 text-gray-300 cursor-not-allowed');
+    btn.className = 'time-btn py-3 rounded-2xl border-2 border-transparent shadow-sm font-medium text-sm transition-colors '
+      + (isSelectable ? 'bg-white hover:border-cyan-100' : 'bg-gray-100 text-gray-300 cursor-not-allowed');
     btn.textContent = label;
     btn.disabled = !isSelectable;
     if (isSelectable){
@@ -523,28 +531,29 @@ async function renderTimeSlots(){
 const fullNameInput = document.getElementById('fullName');
 fullNameInput.addEventListener('input', () => { state.fullName = fullNameInput.value.trim(); setMainEnabled(state.fullName.length > 2); });
 
-// Tap anywhere outside an input/textarea to dismiss the keyboard
 document.addEventListener('click', (e) => {
   const active = document.activeElement;
   if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA') && e.target !== active){
     active.blur();
   }
 });
+
 function renderSummary(){
   const eqLabel = {sup_single:'Сап одномісний',sup_double:'Сап двомісний',kayak_single:'Каяк одномісний',kayak_double:'Каяк двомісний'}[state.equipment] || '';
   const durLabel = state.duration === 'morning' ? 'Сплав на світанку' : (state.duration + ' год');
   document.getElementById('summaryBox').innerHTML = `
-    <div class="flex justify-between"><span>Дата</span><span class="font-medium text-gray-900">${state.date}</span></div>
-    <div class="flex justify-between"><span>Тривалість</span><span class="font-medium text-gray-900">${durLabel}</span></div>
-    <div class="flex justify-between"><span>Спорядження</span><span class="font-medium text-gray-900">${eqLabel} × ${state.quantity}</span></div>
-    <div class="flex justify-between"><span>Час</span><span class="font-medium text-gray-900">${state.time}</span></div>`;
+    <div class="flex justify-between"><span>Дата</span><span class="font-medium text-[#006477]">${state.date}</span></div>
+    <div class="flex justify-between"><span>Тривалість</span><span class="font-medium text-[#006477]">${durLabel}</span></div>
+    <div class="flex justify-between"><span>Спорядження</span><span class="font-medium text-[#006477]">${eqLabel} × ${state.quantity}</span></div>
+    <div class="flex justify-between"><span>Час</span><span class="font-medium text-[#006477]">${state.time}</span></div>`;
 }
 
 function selectOne(selector, active){
-  document.querySelectorAll(selector).forEach(el => el.classList.remove('border-blue-600'));
-  active.classList.add('border-blue-600');
+  document.querySelectorAll(selector).forEach(el => el.classList.remove('border-[#0097B2]'));
+  active.classList.add('border-[#0097B2]');
 }
 function setMainEnabled(ok){ document.getElementById('mainBtn').disabled = !ok; }
+
 function showStep(n){
   clearWizardNotice();
   document.querySelectorAll('.step').forEach(s => s.classList.add('hidden'));
@@ -574,10 +583,10 @@ function showWizardNotice(text, isError){
   if (!el){
     el = document.createElement('div');
     el.id = 'wizardNotice';
-    el.className = 'fixed left-0 right-0 bottom-24 px-4 z-20';
+    el.className = 'fixed left-0 right-0 bottom-24 px-4 z-40';
     document.getElementById('app').appendChild(el);
   }
-  el.innerHTML = `<div class="max-w-md mx-auto rounded-xl px-4 py-3 text-sm font-medium shadow-lg text-center ${isError ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-700'}">${text}</div>`;
+  el.innerHTML = `<div class="max-w-md mx-auto rounded-xl px-4 py-3 text-sm font-medium shadow-lg text-center ${isError ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-cyan-50 text-[#0097B2] border border-cyan-100'}">${text}</div>`;
 }
 function clearWizardNotice(){
   const el = document.getElementById('wizardNotice');
@@ -586,8 +595,6 @@ function clearWizardNotice(){
 
 async function submitBooking(){
   if (!tg?.sendData){
-    // Not actually running inside a proper Telegram Mini App session — sendData
-    // would silently do nothing and the booking would be lost with no feedback.
     showWizardNotice('❌ Це можливо лише всередині Telegram. Відкрийте застосунок через кнопку в чаті з ботом.', true);
     return;
   }
@@ -597,11 +604,6 @@ async function submitBooking(){
   mainBtn.textContent = 'Перевіряємо наявність…';
   clearWizardNotice();
 
-  // Re-check this exact slot right before submitting: the availability shown
-  // earlier may be minutes old by the time the user finishes step 4, and someone
-  // else could have taken it in the meantime. Catching that here — instead of
-  // letting the app close and the user find out via a chat message later —
-  // is what "available in the UI but booking fails" was caused by.
   try {
     if (state.duration === 'morning' && await isMorningClosedForDate(state.date)){
       mainBtn.disabled = false;
@@ -627,8 +629,6 @@ async function submitBooking(){
     }
   } catch (e) {
     console.error('pre-submit availability check failed:', e);
-    // Fall through — the backend still re-validates atomically before writing,
-    // this check is a UX improvement, not the source of truth.
   }
 
   const payload = { type:'booking', date: state.date, duration: state.duration, equipment: state.equipment, quantity: state.quantity, time: state.time, full_name: state.fullName };
@@ -636,9 +636,6 @@ async function submitBooking(){
     if (phone) payload.phone = phone;
     mainBtn.textContent = 'Надсилаємо…';
     tg.sendData(JSON.stringify(payload));
-    // Telegram closes the Mini App itself right after sendData(); show the
-    // notice first so the user actually sees it during that brief window,
-    // and tells them where to look for the real confirmation.
     showWizardNotice('✅ Заявку надіслано! Підтвердження прийде в чаті з ботом.', false);
     setTimeout(() => tg?.close(), 600);
   };
@@ -661,7 +658,7 @@ async function submitBooking(){
 }
 showStep(1);
 
-/* ================= MY BOOKINGS (dynamic) ================= */
+/* ================= MY BOOKINGS ================= */
 const bookingsList = document.getElementById('bookingsList');
 const bookingSearchBox = document.getElementById('bookingSearchBox');
 const bookingShareBtn = document.getElementById('bookingShareBtn');
@@ -678,7 +675,6 @@ async function shareBookingContact(){
     bookingSearchHint.textContent = 'Контактний доступ недоступний у цьому клієнті Telegram.';
     return;
   }
-
   bookingSearchHint.textContent = 'Запитуємо контакт…';
 
   try {
@@ -695,7 +691,6 @@ async function shareBookingContact(){
       bookingSearchHint.textContent = 'Контакт не було надано.';
       return;
     }
-
     const normalizedPhone = normalizePhoneInput(result.phone);
     await renderBookings(normalizedPhone);
   } catch (error) {
@@ -718,7 +713,6 @@ async function fetchMyBookings(phone){
 function renderBookingsEmptyState(message){
   bookingsList.innerHTML = `<div class="text-center text-gray-400 text-sm mt-10">${message}</div>`;
 }
-
 function renderBookingSearchState(){
   bookingSearchHint.textContent = 'Натисніть кнопку, щоб поділитися номером і завантажити свої бронювання.';
 }
@@ -734,7 +728,7 @@ async function renderBookings(phone){
   bookingSearchHint.textContent = normalizedPhone
     ? `Шукаємо бронювання за ${normalizedPhone}…`
     : 'Шукаємо бронювання за профілем Telegram…';
-  bookingsList.innerHTML = `<div class="text-center text-gray-400 text-sm mt-10">Завантаження…</div>`;
+  bookingsList.innerHTML = `<div class="text-center text-[#0097B2] text-sm mt-10">Завантаження…</div>`;
   let bookings;
   try {
     bookings = await fetchMyBookings(normalizedPhone);
@@ -755,16 +749,16 @@ async function renderBookings(phone){
   bookingsList.innerHTML = '';
   bookings.forEach(b => {
     const card = document.createElement('div');
-    card.className = 'bg-white rounded-2xl p-4 shadow-sm';
+    card.className = 'bg-white rounded-2xl p-4 shadow-sm border border-cyan-50';
     card.innerHTML = `
       <div class="flex justify-between items-start mb-2">
         <div class="text-sm text-gray-400">Код бронювання</div>
-        <div class="text-sm font-bold tracking-wide">#${b.code}</div>
+        <div class="text-sm font-bold tracking-wide text-[#006477]">#${b.code}</div>
       </div>
-      <div class="flex justify-between text-sm mb-1"><span class="text-gray-400">Дата</span><span class="font-medium">${b.date}</span></div>
-      <div class="flex justify-between text-sm mb-1"><span class="text-gray-400">Час</span><span class="font-medium">${b.time}</span></div>
-      <div class="flex justify-between text-sm mb-3"><span class="text-gray-400">Спорядження</span><span class="font-medium text-right">${b.equipment}</span></div>
-      <button class="cancel-btn w-full bg-red-50 text-red-600 font-semibold py-2.5 rounded-xl">Скасувати бронювання</button>`;
+      <div class="flex justify-between text-sm mb-1"><span class="text-gray-400">Дата</span><span class="font-medium text-[#006477]">${b.date}</span></div>
+      <div class="flex justify-between text-sm mb-1"><span class="text-gray-400">Час</span><span class="font-medium text-[#006477]">${b.time}</span></div>
+      <div class="flex justify-between text-sm mb-3"><span class="text-gray-400">Спорядження</span><span class="font-medium text-right text-[#006477]">${b.equipment}</span></div>
+      <button class="cancel-btn w-full bg-red-50 text-red-500 font-semibold py-2.5 rounded-xl transition hover:bg-red-100">Скасувати бронювання</button>`;
     card.querySelector('.cancel-btn').onclick = () => cancelBooking(b.code, card);
     bookingsList.appendChild(card);
   });
@@ -774,9 +768,6 @@ bookingShareBtn.onclick = () => shareBookingContact();
 
 const bookingPhoneInput = document.getElementById('bookingPhoneInput');
 const bookingPhoneSearchBtn = document.getElementById('bookingPhoneSearchBtn');
-// Manual entry: requestContact() isn't available on every Telegram client
-// (notably Telegram Desktop), so without this, those users had no way at all
-// to search their bookings by phone.
 bookingPhoneSearchBtn.onclick = () => {
   const raw = bookingPhoneInput.value.trim();
   if (!raw){
@@ -793,13 +784,10 @@ function initBookingsTab(){
   renderBookingSearchState();
   renderBookingsEmptyState('Натисніть “Поділитися номером”, щоб знайти свої бронювання.');
 }
-
 initBookingsTab();
 
 function cancelBooking(code, cardEl){
   if (!tg?.sendData){
-    // Same problem as booking: outside a real Telegram Mini App session this
-    // would silently do nothing.
     bookingSearchHint.textContent = '❌ Скасування можливе лише всередині Telegram.';
     return;
   }
@@ -808,9 +796,6 @@ function cancelBooking(code, cardEl){
   btn.textContent = 'Скасовується…';
   btn.disabled = true;
   tg.sendData(JSON.stringify({ type:'cancel', cancel_code: code }));
-  // As with booking, Telegram closes the Mini App right after sendData() is
-  // called — give the user a moment to actually see this before that happens,
-  // rather than the card just vanishing with no indication anything worked.
   btn.textContent = '✅ Надіслано, перевірте чат';
   setTimeout(() => tg?.close(), 900);
 }
@@ -825,18 +810,18 @@ const ACCORDIONS = [
     "<b>Аксесуари:</b><br>• Весло під сапборд — 2 200 грн<br>• Весло під каяк — 2 800 грн<br>• Плавник під сап-дошку — 600 грн<br>• Плавник до каяка — 700 грн<br>• Сидіння до каяка — 1 200 грн<br>• Гермомішок — 400 грн<br>• Страхувальний лиш для SUP — 650 грн<br><br>" +
     "<i>У разі пошкодження обладнання до вас буде застосована відповідна компенсація.</i>" },
   { icon:'📞', title:'Контакти', body:
-    "Телефон: <a class='text-blue-600' href='tel:+380989055753'>+380 98 905 57 53</a><br>Пошта: <a class='text-blue-600' href='mailto:mandry70625@gmail.com'>mandry70625@gmail.com</a><br>Instagram: <a class='text-blue-600' href='https://www.instagram.com/mandry.sup/' target='_blank'>@mandry.sup</a>" }
+    "Телефон: <a class='text-[#0097B2] font-medium' href='tel:+380989055753'>+380 98 905 57 53</a><br>Пошта: <a class='text-[#0097B2] font-medium' href='mailto:mandry70625@gmail.com'>mandry70625@gmail.com</a><br>Instagram: <a class='text-[#0097B2] font-medium' href='https://www.instagram.com/mandry.sup/' target='_blank'>@mandry.sup</a>" }
 ];
 const accordionsEl = document.getElementById('accordions');
 ACCORDIONS.forEach((item, idx) => {
   const wrap = document.createElement('div');
-  wrap.className = 'bg-white rounded-2xl shadow-sm overflow-hidden';
+  wrap.className = 'bg-white rounded-2xl shadow-sm overflow-hidden border border-cyan-50';
   wrap.innerHTML = `
-    <button class="acc-toggle w-full flex items-center justify-between px-4 py-3.5 text-left">
-      <span class="font-semibold text-sm">${item.icon} ${item.title}</span>
-      <span class="acc-chevron text-gray-300 transition-transform">▾</span>
+    <button class="acc-toggle w-full flex items-center justify-between px-4 py-3.5 text-left transition hover:bg-cyan-50/30">
+      <span class="font-semibold text-sm text-[#006477]">${item.icon} ${item.title}</span>
+      <span class="acc-chevron text-[#0097B2] transition-transform">▾</span>
     </button>
-    <div class="acc-body hidden px-4 pb-4 text-sm text-gray-500 leading-relaxed">${item.body}</div>`;
+    <div class="acc-body hidden px-4 pb-4 text-sm text-gray-500 leading-relaxed border-t border-cyan-50/50 mt-1 pt-3">${item.body}</div>`;
   const toggle = wrap.querySelector('.acc-toggle');
   const body = wrap.querySelector('.acc-body');
   const chevron = wrap.querySelector('.acc-chevron');
