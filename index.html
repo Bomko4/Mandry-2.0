@@ -39,7 +39,7 @@
 
   <!-- ============ TAB: BOOK ============ -->
   <div id="tab-book" class="tab-panel flex flex-col flex-1 content-layer">
-    <!-- Верхня панель (тепер прозора, щоб було видно патерн) -->
+    <!-- Верхня панель -->
     <div class="px-4 pt-4 pb-2 z-20 bg-transparent">
       <div class="flex items-center justify-between mb-4">
         <button onclick="prevStep()" id="backBtn" class="text-[#0097B2] text-sm font-medium w-16 text-left">‹ Назад</button>
@@ -55,8 +55,8 @@
       </div>
     </div>
 
-    <!-- Область прокрутки контенту -->
-    <div class="flex-1 px-4 pb-24 overflow-y-auto">
+    <!-- Область прокрутки контенту (збільшено pb-36 щоб кнопка не перекривала контент) -->
+    <div class="flex-1 px-4 pb-36 overflow-y-auto">
       <section id="step1" class="step">
         <h2 class="text-xl font-bold mt-2 mb-3 text-[#006477]">Оберіть дату</h2>
         <div id="dateScroll" class="flex gap-2 overflow-x-auto noscroll pb-2 mb-6"></div>
@@ -245,45 +245,64 @@ async function isMorningClosedForDate(dateStr){
 async function initDateScroll(){
   const today = await getServerToday();
   dateScroll.innerHTML = '';
+  
+  // Генеруємо список дат
   for (let i=0;i<28;i++){
     const d = new Date(today); d.setDate(d.getDate()+i);
     const isWeekend = d.getDay() === 0 || d.getDay() === 6;
     const isToday = i === 0;
+    
     const btn = document.createElement('button');
-    btn.className = 'date-btn flex-shrink-0 w-16 py-2.5 rounded-2xl bg-white border-2 shadow-sm text-center transition-colors '
-      + (isToday ? 'border-[#0097B2]' : 'border-transparent hover:border-cyan-100');
+    btn.className = 'date-btn flex-shrink-0 w-16 py-2.5 rounded-2xl bg-white border-2 border-transparent shadow-sm text-center transition-colors hover:border-cyan-100';
+    
     const dd = String(d.getDate()).padStart(2,'0');
     const mm = String(d.getMonth()+1).padStart(2,'0');
     btn.dataset.val = `${dd}.${mm}`;
+    
     const dayColor = isWeekend ? 'text-[#0097B2] font-bold' : 'text-gray-400';
     const numColor = isWeekend ? 'text-[#0097B2]' : 'text-gray-800';
+    
     btn.innerHTML = `<div class="text-[11px] ${dayColor}">${DAYS[d.getDay()]}</div><div class="text-lg font-bold leading-tight ${numColor}">${d.getDate()}</div><div class="text-[11px] text-gray-400">${MONTHS[d.getMonth()]}</div>${isToday ? '<div class="text-[9px] text-[#0097B2] font-semibold mt-0.5">сьогодні</div>' : ''}`;
+    
     btn.onclick = () => { selectOne('.date-btn', btn); state.date = btn.dataset.val; state.time = null; state.equipment = null; checkStep1(); };
     dateScroll.appendChild(btn);
   }
 
   const dateStrs = Array.from(document.querySelectorAll('.date-btn')).map(b => b.dataset.val);
-  if (!API_BASE_URL || dateStrs.length === 0) return;
-  try {
-    const res = await fetch(`${API_BASE_URL}/days-status?dates=${encodeURIComponent(dateStrs.join(','))}&_=${Date.now()}`, { cache: 'no-store' });
-    if (!res.ok) throw new Error('bad response');
-    const statusMap = await res.json();
-    document.querySelectorAll('.date-btn').forEach(btn => {
-      if (statusMap[btn.dataset.val]) {
-        btn.disabled = true;
-        btn.classList.add('opacity-30', 'cursor-not-allowed');
-        btn.onclick = null;
-        if (state.date === btn.dataset.val) { state.date = null; checkStep1(); }
+  
+  if (API_BASE_URL && dateStrs.length > 0) {
+    try {
+      const res = await fetch(`${API_BASE_URL}/days-status?dates=${encodeURIComponent(dateStrs.join(','))}&_=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const statusMap = await res.json();
+        document.querySelectorAll('.date-btn').forEach(btn => {
+          if (statusMap[btn.dataset.val]) {
+            btn.disabled = true;
+            btn.classList.add('opacity-30', 'cursor-not-allowed');
+            btn.onclick = null;
+            if (state.date === btn.dataset.val) { state.date = null; checkStep1(); }
+          }
+        });
       }
-    });
-  } catch (e) {
-    console.error('fetchDaysStatus failed:', e);
+    } catch (e) {
+      console.error('fetchDaysStatus failed:', e);
+    }
+  }
+
+  // АВТОМАТИЧНИЙ ВИБІР ДАТИ
+  // Після перевірки доступних днів клікаємо на першу доступну дату (сьогодні)
+  const firstAvailableBtn = Array.from(document.querySelectorAll('.date-btn')).find(b => !b.disabled);
+  if (firstAvailableBtn) {
+    firstAvailableBtn.click();
   }
 }
+
 initDateScroll();
+
 document.querySelectorAll('.dur-btn').forEach(btn=>{
   btn.onclick = () => { selectOne('.dur-btn', btn); resetBookingSelection(); state.duration = btn.dataset.val; checkStep1(); };
 });
+
 function checkStep1(){ setMainEnabled(!!state.date && !!state.duration); }
 
 const SUPS = [
@@ -310,8 +329,10 @@ function buildEquipmentCard(item, container){
   const disabled = maxQty === 0;
   const showQty = item.id.startsWith('sup_');
   const card = document.createElement('div');
+  
   card.className = 'eq-card flex-shrink-0 w-40 bg-white rounded-2xl shadow-sm overflow-hidden border-2 border-transparent transition-colors '
     + (disabled ? ' opacity-40' : ' cursor-pointer hover:border-cyan-100');
+    
   card.innerHTML = `
     <div class="h-24 bg-[#EAF8FA]/50 flex items-center justify-center text-4xl">${item.img}</div>
     <div class="p-3">
@@ -551,10 +572,12 @@ function renderSummary(){
     <div class="flex justify-between"><span>Час</span><span class="font-medium text-[#006477]">${state.time}</span></div>`;
 }
 
+// Функція оновлена: додає темно-бірюзовий колір обведення #005263
 function selectOne(selector, active){
-  document.querySelectorAll(selector).forEach(el => el.classList.remove('border-[#0097B2]'));
-  active.classList.add('border-[#0097B2]');
+  document.querySelectorAll(selector).forEach(el => el.classList.remove('border-[#005263]'));
+  active.classList.add('border-[#005263]');
 }
+
 function setMainEnabled(ok){ document.getElementById('mainBtn').disabled = !ok; }
 
 function showStep(n){
