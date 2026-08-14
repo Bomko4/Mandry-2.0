@@ -7,23 +7,24 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <style>
   body{-webkit-tap-highlight-color:transparent}.noscroll::-webkit-scrollbar{display:none}.noscroll{-ms-overflow-style:none;scrollbar-width:none}
-  /* Водяний знак для фону */
+  
+  /* Патерн (монограми) для фону */
   .brand-bg {
     position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 150%;
-    height: 100vh;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
     background-image: url('logo.jpg');
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
-    opacity: 0.05; /* Ледь помітний логотип на фоні */
+    background-size: 140px; /* Розмір однієї монограми */
+    background-repeat: repeat;
+    opacity: 0.04; /* Ледь помітний патерн */
     mix-blend-mode: multiply; /* Прибирає білий фон з JPG */
+    transform: rotate(-20deg); /* Нахил для стильнішого вигляду */
     pointer-events: none;
     z-index: 0;
   }
+  
   /* Щоб контент був поверх фону */
   .content-layer {
     position: relative;
@@ -34,21 +35,21 @@
 <body class="bg-[#EAF8FA] min-h-screen font-sans text-gray-900">
 <div id="app" class="max-w-md mx-auto min-h-screen bg-[#EAF8FA] flex flex-col relative overflow-hidden">
   
-  <!-- Задній фон з логотипом -->
+  <!-- Задній фон з патерном -->
   <div class="brand-bg"></div>
 
   <!-- ============ TAB: BOOK ============ -->
   <div id="tab-book" class="tab-panel flex flex-col flex-1 content-layer">
     <div class="sticky top-0 bg-[#EAF8FA]/95 backdrop-blur px-4 pt-3 pb-2 z-20">
       <div class="flex items-center justify-between mb-2">
-        <button onclick="prevStep()" id="backBtn" class="text-[#0097B2] text-sm font-medium">‹ Назад</button>
-        <div class="text-center">
-          <div class="text-[15px] font-semibold text-[#007b91]">MandryBooking2.0</div>
-          <div class="text-[11px] text-[#0097B2]/70">mini app</div>
+        <button onclick="prevStep()" id="backBtn" class="text-[#0097B2] text-sm font-medium w-16 text-left">‹ Назад</button>
+        <div class="flex-1 flex justify-center">
+          <!-- Логотип замість тексту -->
+          <img src="logo.jpg" alt="Mandry SUP" class="h-7 object-contain mix-blend-multiply opacity-90">
         </div>
-        <div class="w-10"></div>
+        <div class="w-16"></div> <!-- Пустий блок для балансу центрування -->
       </div>
-      <div class="text-[11px] text-gray-400 mb-1" id="stepLabel">Крок 1 з 4</div>
+      <div class="text-[11px] text-[#0097B2]/70 font-medium mb-1 text-center" id="stepLabel">Крок 1 з 4</div>
       <div class="h-1.5 bg-cyan-100 rounded-full overflow-hidden">
         <div id="progressBar" class="h-full bg-[#0097B2] rounded-full transition-all" style="width:25%"></div>
       </div>
@@ -96,9 +97,9 @@
 
   <!-- ============ TAB: MY BOOKINGS ============ -->
   <div id="tab-bookings" class="tab-panel hidden flex-1 overflow-y-auto content-layer">
-    <div class="sticky top-0 bg-[#EAF8FA]/95 backdrop-blur px-4 pt-3 pb-2 z-10 text-center">
-      <div class="text-[15px] font-semibold text-[#007b91]">MandryBooking2.0</div>
-      <div class="text-[11px] text-[#0097B2]/70">mini app</div>
+    <div class="sticky top-0 bg-[#EAF8FA]/95 backdrop-blur px-4 pt-3 pb-3 z-10 flex justify-center border-b border-cyan-100/30">
+      <!-- Логотип замість тексту -->
+      <img src="logo.jpg" alt="Mandry SUP" class="h-7 object-contain mix-blend-multiply opacity-90">
     </div>
     <div class="px-4 pb-20">
       <div class="pt-4 pb-3">
@@ -126,9 +127,11 @@
 
   <!-- ============ TAB: ABOUT ============ -->
   <div id="tab-about" class="tab-panel hidden flex-1 overflow-y-auto content-layer">
-    <div class="text-center mt-6 mb-2">
-      <img src="logo.jpg" alt="Mandry SUP" class="h-16 mx-auto object-contain rounded-xl mix-blend-multiply">
+    <div class="sticky top-0 bg-[#EAF8FA]/95 backdrop-blur px-4 pt-3 pb-3 z-10 flex justify-center border-b border-cyan-100/30 mb-4">
+      <!-- Логотип замість тексту -->
+      <img src="logo.jpg" alt="Mandry SUP" class="h-7 object-contain mix-blend-multiply opacity-90">
     </div>
+    
     <div class="px-4 pb-20">
       <div class="pt-2 pb-3">
         <div class="text-xl font-bold text-[#006477] text-center">Інформація</div>
@@ -160,7 +163,6 @@
 const tg = window.Telegram?.WebApp;
 tg?.ready(); tg?.expand();
 
-// Якщо у вас буде файл bg_pattern.png (прозорий), можете додати його в CSS .brand-bg
 const API_BASE_URL = "https://mandrysup.duckdns.org/api";
 
 const TIME_SLOTS = ["10:15-11:15","11:30-12:30","12:45-13:45","14:00-15:00","15:15-16:15","16:30-17:30","17:45-18:45","19:00-20:00","20:10-21:10"];
