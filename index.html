@@ -288,12 +288,6 @@ async function initDateScroll(){
       console.error('fetchDaysStatus failed:', e);
     }
   }
-
-  // Автоматичний вибір першої доступної дати (зазвичай сьогодні)
-  const firstAvailableBtn = Array.from(document.querySelectorAll('.date-btn')).find(b => !b.disabled);
-  if (firstAvailableBtn) {
-    firstAvailableBtn.click();
-  }
 }
 
 initDateScroll();
