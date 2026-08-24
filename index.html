@@ -289,12 +289,6 @@ async function initDateScroll(){
     }
   }
 
-  // Автоматичний вибір першої доступної дати (зазвичай сьогодні)
-  const firstAvailableBtn = Array.from(document.querySelectorAll('.date-btn')).find(b => !b.disabled);
-  if (firstAvailableBtn) {
-    firstAvailableBtn.click();
-  }
-}
 
 initDateScroll();
 
