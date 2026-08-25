@@ -4,6 +4,7 @@ import socket
 import random
 import os
 import time
+import re
 from aiohttp import web
 from dotenv import load_dotenv
 from google.auth.exceptions import RefreshError
@@ -17,6 +18,8 @@ from aiogram.filters import Command
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.filters import BaseFilter
+from aiogram.exceptions import TelegramRetryAfter, TelegramForbiddenError
 
 load_dotenv()
 
@@ -33,6 +36,23 @@ MENU_URL = os.getenv(
     "MENU_URL",
     "https://mandry-sup.choiceqr.com/menu?fbclid=PAdGRleAQvo3hleHRuA2FlbQIxMQABpyHGzMZ2j68WOIA7gDKCuCqXp30fz7ITK-gRUKSmhmg5-lJYxrIhrYtnu0A0_aem_1Qlu08flvE4mnL3TsIC_pw",
 )
+
+# --- ПАРСИНГ АДМІНІСТРАТОРІВ ---
+ADMINS_RAW = os.getenv("ADMINS", "")
+ADMINS = {}
+for pair in ADMINS_RAW.split(","):
+    if ":" in pair:
+        uid_str, name = pair.split(":", 1)
+        if uid_str.strip().isdigit():
+            ADMINS[int(uid_str.strip())] = name.strip()
+
+BROADCAST_SHEET_NAME = os.getenv("BROADCAST_SHEET_NAME", "Архів бронювань")
+
+# --- ФІЛЬТР ДЛЯ АДМІНІВ ---
+class IsAdmin(BaseFilter):
+    async def __call__(self, message: types.Message | types.CallbackQuery) -> bool:
+        return message.from_user.id in ADMINS
+
 WEBAPP_URL = get_required_env("WEBAPP_URL")  # HTTPS URL where index.html is hosted
 
 staff_chat_id_raw = os.getenv("STAFF_CHAT_ID")
@@ -208,6 +228,10 @@ class Booking(StatesGroup):
     phone = State()
     cancel_code = State()
 
+class AdminPanel(StatesGroup):
+    waiting_for_broadcast_text = State()
+    waiting_for_close_date = State()
+    waiting_for_open_date = State()
 
 def parse_booking_datetime(date_str: str, start_time_str: str) -> datetime:
     now = get_current_time()
@@ -2248,6 +2272,247 @@ async def api_days_status(request: web.Request) -> web.Response:
     except Exception as e:
         print(f"[ERROR] api_days_status: {e}")
         return web.json_response({"error": "internal error"}, status=500, headers=headers)
+
+# ================= АДМІН ПАНЕЛЬ =================
+
+@dp.message(Command("admin"), IsAdmin())
+async def cmd_admin(message: types.Message, state: FSMContext):
+    await state.clear()
+    admin_name = ADMINS.get(message.from_user.id, "Адмін")
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(types.InlineKeyboardButton(text="📢 Розсилка", callback_data="admin_broadcast"))
+    builder.row(types.InlineKeyboardButton(text="🔒 Закрити день", callback_data="admin_close_day"))
+    builder.row(types.InlineKeyboardButton(text="🔓 Відкрити день", callback_data="admin_open_day"))
+    
+    await message.answer(f"Привіт {admin_name} що будемо робити?", reply_markup=builder.as_markup())
+
+
+@dp.callback_query(F.data == "admin_close_day", IsAdmin())
+async def admin_close_day(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("Введіть дату для ЗАКРИТТЯ у форматі ДД.ММ (наприклад, 15.08):")
+    await state.set_state(AdminPanel.waiting_for_close_date)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "admin_open_day", IsAdmin())
+async def admin_open_day(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("Введіть дату для ВІДКРИТТЯ у форматі ДД.ММ (наприклад, 15.08):")
+    await state.set_state(AdminPanel.waiting_for_open_date)
+    await callback.answer()
+
+
+# --- ЛОГІКА РОЗСИЛКИ ---
+
+@dp.callback_query(F.data == "admin_broadcast", IsAdmin())
+async def start_broadcast_flow(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("Введіть повідомлення для розсилки (можна використовувати емодзі, форматування тощо):")
+    await state.set_state(AdminPanel.waiting_for_broadcast_text)
+    await callback.answer()
+
+
+@dp.message(AdminPanel.waiting_for_broadcast_text, IsAdmin())
+async def preview_broadcast(message: types.Message, state: FSMContext):
+    # Зберігаємо введений текст
+    await state.update_data(broadcast_text=message.html_text) # Зберігаємо з HTML розміткою
+    
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        types.InlineKeyboardButton(text="✅ Підтвердити і надіслати", callback_data="admin_confirm_broadcast"),
+        types.InlineKeyboardButton(text="❌ Скасувати", callback_data="admin_cancel_broadcast")
+    )
+    
+    await message.answer("<b>Попередній перегляд повідомлення:</b>\n\n" + message.html_text, parse_mode="HTML")
+    await message.answer("Надіслати це повідомлення всім клієнтам з таблиці?", reply_markup=builder.as_markup())
+
+
+@dp.callback_query(F.data == "admin_cancel_broadcast", IsAdmin())
+async def cancel_broadcast(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text("❌ Розсилку скасовано.")
+    await callback.answer()
+
+@dp.callback_query(F.data == "admin_confirm_broadcast", IsAdmin())
+async def execute_broadcast(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    text_to_send = data.get("broadcast_text")
+    await state.clear()
+    
+    await callback.message.edit_text("🔄 Збираю базу UID з таблиці, зачекайте...")
+    
+    # Функція зчитування UID в окремому потоці, щоб не блокувати бота
+    def _extract_uids():
+        uids = set()
+        try:
+            b_sh = gc.open(BROADCAST_SHEET_NAME)
+            for ws in b_sh.worksheets():
+                for row in ws.get_all_values():
+                    for cell in row:
+                        if isinstance(cell, str) and "UID:" in cell:
+                            for line in cell.split("\n"):
+                                if line.startswith("UID:"):
+                                    uid_part = line[4:].strip()
+                                    if uid_part.isdigit():
+                                        uids.add(int(uid_part))
+        except Exception as e:
+            print(f"[ERROR] Помилка читання бази для розсилки: {e}")
+        return uids
+
+    uids_to_send = await asyncio.to_thread(_extract_uids)
+    
+    if not uids_to_send:
+        await callback.message.answer(f"❌ Не знайдено жодного UID у таблиці '{BROADCAST_SHEET_NAME}'.")
+        return
+        
+    await callback.message.answer(f"🚀 Починаю розсилку для {len(uids_to_send)} користувачів. Я напишу, коли закінчу.")
+    
+    # Запускаємо фонову задачу розсилки
+    asyncio.create_task(run_broadcast_task(callback.from_user.id, text_to_send, uids_to_send))
+    await callback.answer()
+
+
+async def run_broadcast_task(admin_id: int, text: str, uids: set):
+    success = 0
+    blocked = 0
+    errors = 0
+    
+    for uid in uids:
+        try:
+            await bot.send_message(chat_id=uid, text=text, parse_mode="HTML")
+            success += 1
+            await asyncio.sleep(0.1)  # Захист від блокування (Flood Control)
+            
+        except TelegramRetryAfter as e:
+            # Якщо телеграм просить зачекати - чекаємо
+            await asyncio.sleep(e.retry_after)
+            try:
+                await bot.send_message(chat_id=uid, text=text, parse_mode="HTML")
+                success += 1
+            except Exception:
+                errors += 1
+                
+        except TelegramForbiddenError:
+            # Користувач заблокував бота
+            blocked += 1
+        except Exception as e:
+            errors += 1
+            
+    # Звіт для адміністратора
+    report = (
+        "<b>✅ Розсилка завершена!</b>\n\n"
+        f"Успішно надіслано: {success}\n"
+        f"Заблокували бота: {blocked}\n"
+        f"Інші помилки: {errors}"
+    )
+    try:
+        await bot.send_message(chat_id=admin_id, text=report, parse_mode="HTML")
+    except Exception:
+        pass
+
+@dp.message(AdminPanel.waiting_for_close_date, IsAdmin())
+async def process_close_day(message: types.Message, state: FSMContext):
+    date_str = message.text.strip()
+    if not re.match(r"^\d{2}\.\d{2}$", date_str):
+        await message.answer("❌ Невірний формат. Введіть дату як ДД.ММ (наприклад, 15.08).")
+        return
+
+    await message.answer(f"⏳ Перевіряю дату {date_str}...")
+    await state.clear()
+
+    try:
+        ws = await get_or_create_sheet(date_str)
+        
+        async with get_sheet_lock(date_str):
+            # Примусово беремо найсвіжіші дані
+            all_values = await asyncio.to_thread(_cached_get_all_values, ws, True)
+            
+            # Шукаємо існуючі бронювання (групуємо по ID, щоб уникнути дублів для 2-годинних слотів)
+            unique_bookings = {}
+            for r_idx, row in enumerate(all_values):
+                time_label = row[0].strip() if row else "Невідомо"
+                for c_idx, cell in enumerate(row):
+                    if isinstance(cell, str) and "ID:" in cell:
+                        lines = [line.strip() for line in cell.split("\n")]
+                        b_id = lines[0]
+                        if b_id not in unique_bookings:
+                            name = lines[1] if len(lines) > 1 else "Невідомо"
+                            phone = lines[2] if len(lines) > 2 else "Невідомо"
+                            unique_bookings[b_id] = f"Час: {time_label} | {name} ({phone}) | Код: {b_id}"
+            
+            if unique_bookings:
+                bookings_text = "\n".join(unique_bookings.values())
+                await message.answer(
+                    f"⚠️ <b>На цю дату ({date_str}) вже є бронювання!</b>\n\n"
+                    f"{bookings_text}\n\n"
+                    f"❗️ Узгодьте скасування і тоді повертайтесь, щоб закрити день.",
+                    parse_mode="HTML"
+                )
+                return
+            
+            # Якщо бронювань немає - закриваємо (ставимо зірочки)
+            def _write_stars():
+                # Звичайні слоти
+                star_block = [["*" for _ in COLUMNS] for _ in TIME_SLOTS]
+                start_cell = gspread.utils.rowcol_to_a1(2, 2)
+                end_cell = gspread.utils.rowcol_to_a1(len(TIME_SLOTS) + 1, len(COLUMNS) + 1)
+                ws.update(f"{start_cell}:{end_cell}", star_block)
+                
+                # Ранковий сплав (якщо таблиця ранкового сплаву вже ініціалізована)
+                header_row, data_row = _morning_table_row_indexes(all_values)
+                if data_row is not None:
+                    morning_star_block = [["*" for _ in COLUMNS]]
+                    m_start = gspread.utils.rowcol_to_a1(data_row + 1, 2)
+                    m_end = gspread.utils.rowcol_to_a1(data_row + 1, len(COLUMNS) + 1)
+                    ws.update(f"{m_start}:{m_end}", morning_star_block)
+                
+                _invalidate_values_cache(ws)
+
+            await asyncio.to_thread(_write_stars)
+            
+        await message.answer(f"✅ День {date_str} успішно закрито (всі вільні слоти заповнено '*').")
+        
+    except Exception as e:
+        print(f"[ERROR] process_close_day: {e}")
+        await message.answer("❌ Сталася помилка при закритті дня.")
+
+
+@dp.message(AdminPanel.waiting_for_open_date, IsAdmin())
+async def process_open_day(message: types.Message, state: FSMContext):
+    date_str = message.text.strip()
+    if not re.match(r"^\d{2}\.\d{2}$", date_str):
+        await message.answer("❌ Невірний формат. Введіть дату як ДД.ММ (наприклад, 15.08).")
+        return
+
+    await message.answer(f"⏳ Відкриваю дату {date_str}...")
+    await state.clear()
+
+    try:
+        ws = await get_or_create_sheet(date_str)
+        
+        async with get_sheet_lock(date_str):
+            all_values = await asyncio.to_thread(_cached_get_all_values, ws, True)
+            
+            def _clear_stars():
+                updates = []
+                for r_idx, row in enumerate(all_values):
+                    for c_idx, cell in enumerate(row):
+                        # Видаляємо ТІЛЬКИ зірочки, не чіпаючи дефіси черги чи існуючі бронювання (якщо вони були)
+                        if c_idx > 0 and isinstance(cell, str) and cell.strip() == "*":
+                            updates.append({
+                                "range": gspread.utils.rowcol_to_a1(r_idx + 1, c_idx + 1),
+                                "values": [[""]]
+                            })
+                if updates:
+                    ws.batch_update(updates)
+                _invalidate_values_cache(ws)
+
+            await asyncio.to_thread(_clear_stars)
+            
+        await message.answer(f"✅ День {date_str} успішно відкрито (всі символи '*' видалено).")
+        
+    except Exception as e:
+        print(f"[ERROR] process_open_day: {e}")
+        await message.answer("❌ Сталася помилка при відкритті дня.")
 
 async def start_web_api():
     app = web.Application()
