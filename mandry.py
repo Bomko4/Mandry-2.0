@@ -5,6 +5,7 @@ import random
 import os
 import time
 import re
+import json
 from aiohttp import web
 from dotenv import load_dotenv
 from google.auth.exceptions import RefreshError
@@ -47,6 +48,29 @@ for pair in ADMINS_RAW.split(","):
             ADMINS[int(uid_str.strip())] = name.strip()
 
 BROADCAST_SHEET_NAME = os.getenv("BROADCAST_SHEET_NAME", "Архів бронювань")
+
+UIDS_FILE = "uids.json"
+
+# --- Запис в базу ---
+def load_uids() -> set:
+    if not os.path.exists(UIDS_FILE):
+        return set()
+    try:
+        with open(UIDS_FILE, "r", encoding="utf-8") as f:
+            return set(json.load(f))
+    except Exception as e:
+        print(f"[ERROR] Помилка читання {UIDS_FILE}: {e}")
+        return set()
+
+def save_uid(uid: int):
+    uids = load_uids()
+    if uid not in uids:
+        uids.add(uid)
+        try:
+            with open(UIDS_FILE, "w", encoding="utf-8") as f:
+                json.dump(list(uids), f)
+        except Exception as e:
+            print(f"[ERROR] Помилка запису в {UIDS_FILE}: {e}")
 
 # --- ФІЛЬТР ДЛЯ АДМІНІВ ---
 class IsAdmin(BaseFilter):
@@ -1934,6 +1958,8 @@ async def finalize_booking(message: types.Message, state: FSMContext, phone: str
             equipment_note=equipment_note,
         )
 
+        await asyncio.to_thread(save_uid, user_chat_id)
+
         if data.get('morning'):
             morning_booking_chat_ids.setdefault(data['date'], set()).add(user_chat_id)
             schedule_morning_finalization(data['date'])
@@ -1949,6 +1975,7 @@ async def finalize_booking(message: types.Message, state: FSMContext, phone: str
             f"Клієнт: {client_name}\n"
             f"Телефон: {phone}"
         )
+    
         if STAFF_CHAT_ID is not None:
             try:
                 print(f"[INFO] Надсилаємо повідомлення в чат {STAFF_CHAT_ID}")
@@ -2287,6 +2314,37 @@ async def cmd_admin(message: types.Message, state: FSMContext):
     
     await message.answer(f"Привіт {admin_name} що будемо робити?", reply_markup=builder.as_markup())
 
+@dp.message(Command("sync_uids"), IsAdmin())
+async def cmd_sync_uids(message: types.Message):
+    await message.answer("🔄 Починаю сканування Google Таблиці. Переношу старих клієнтів у локальну базу...\nЦе може зайняти близько хвилини.")
+    
+    def _extract_all_uids():
+        uids = load_uids()
+        initial_count = len(uids)
+        try:
+            # Скануємо основну таблицю
+            sh_to_scan = gc.open(SHEET_NAME) 
+            for ws in sh_to_scan.worksheets():
+                for row in ws.get_all_values():
+                    for cell in row:
+                        if isinstance(cell, str) and "UID:" in cell.upper():
+                            for line in cell.split("\n"):
+                                clean_line = line.strip()
+                                if clean_line.upper().startswith("UID:"):
+                                    uid_part = clean_line[4:].strip()
+                                    if uid_part.isdigit():
+                                        uids.add(int(uid_part))
+            
+            # Зберігаємо об'єднаний список
+            with open(UIDS_FILE, "w", encoding="utf-8") as f:
+                json.dump(list(uids), f)
+        except Exception as e:
+            print(f"[ERROR] Помилка синхронізації: {e}")
+            
+        return len(uids) - initial_count, len(uids)
+
+    added, total = await asyncio.to_thread(_extract_all_uids)
+    await message.answer(f"✅ Синхронізація завершена!\nЗнайдено та перенесено нових UID: {added}\nВсього в базі для розсилки тепер: {total} користувачів.")
 
 @dp.callback_query(F.data == "admin_close_day", IsAdmin())
 async def admin_close_day(callback: types.CallbackQuery, state: FSMContext):
@@ -2338,30 +2396,12 @@ async def execute_broadcast(callback: types.CallbackQuery, state: FSMContext):
     text_to_send = data.get("broadcast_text")
     await state.clear()
     
-    await callback.message.edit_text("🔄 Збираю базу UID з таблиці, зачекайте...")
+    await callback.message.edit_text("🔄 Збираю базу UID, зачекайте...")
     
-    # Функція зчитування UID в окремому потоці, щоб не блокувати бота
-    def _extract_uids():
-        uids = set()
-        try:
-            b_sh = gc.open(BROADCAST_SHEET_NAME)
-            for ws in b_sh.worksheets():
-                for row in ws.get_all_values():
-                    for cell in row:
-                        if isinstance(cell, str) and "UID:" in cell:
-                            for line in cell.split("\n"):
-                                if line.startswith("UID:"):
-                                    uid_part = line[4:].strip()
-                                    if uid_part.isdigit():
-                                        uids.add(int(uid_part))
-        except Exception as e:
-            print(f"[ERROR] Помилка читання бази для розсилки: {e}")
-        return uids
-
-    uids_to_send = await asyncio.to_thread(_extract_uids)
+    uids_to_send = await asyncio.to_thread(load_uids)
     
     if not uids_to_send:
-        await callback.message.answer(f"❌ Не знайдено жодного UID у таблиці '{BROADCAST_SHEET_NAME}'.")
+        await callback.message.answer(f"❌ Не знайдено жодного UID у базі.")
         return
         
     await callback.message.answer(f"🚀 Починаю розсилку для {len(uids_to_send)} користувачів. Я напишу, коли закінчу.")
