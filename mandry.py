@@ -2316,11 +2316,10 @@ async def cmd_admin(message: types.Message, state: FSMContext):
 
 @dp.message(Command("sync_uids"), IsAdmin())
 async def cmd_sync_uids(message: types.Message):
-    # Множина всіх можливих назв ваших таблиць. 
-    # Бот спробує відкрити їх усі. Якщо якоїсь немає - він просто піде далі.
-    tables_to_scan = {SHEET_NAME, BROADCAST_SHEET_NAME, "Архів Бронювань Мандри", "Мандри бронь"}
+    # Явно вказуємо точні назви таблиць
+    tables_to_scan = {SHEET_NAME, "Архів Бронювань Мандри"}
     
-    await message.answer(f"🔄 Починаю сканування таблиць:\n{', '.join(tables_to_scan)}\n\nЦе може зайняти хвилину...")
+    await message.answer(f"🔄 Починаю сканування таблиць:\n{', '.join(tables_to_scan)}\n\n⏳ Це може зайняти кілька хвилин (працюю повільно, щоб не заблокував Google). Зачекайте...")
     
     def _extract_all_uids():
         uids = load_uids()
@@ -2332,7 +2331,11 @@ async def cmd_sync_uids(message: types.Message):
                 continue
             try:
                 sh_to_scan = gc.open(table_name) 
-                for ws in sh_to_scan.worksheets():
+                worksheets = sh_to_scan.worksheets()
+                for ws in worksheets:
+                    # Захист від блокування Google (ліміт: 60 запитів на хвилину)
+                    # Робимо паузу 1.5 сек перед кожним аркушем
+                    time.sleep(1.5) 
                     for row in ws.get_all_values():
                         for cell in row:
                             if isinstance(cell, str):
@@ -2340,12 +2343,15 @@ async def cmd_sync_uids(message: types.Message):
                                 matches = re.findall(r'(?i)UID:\s*(-?\d+)', cell)
                                 for match in matches:
                                     uids.add(int(match))
-                report_lines.append(f"✅ <b>{table_name}</b>: успішно проскановано")
+                report_lines.append(f"✅ <b>{table_name}</b>: успішно проскановано (аркушів: {len(worksheets)})")
             except Exception as e:
-                if "SpreadsheetNotFound" in str(type(e)):
+                error_type = str(type(e).__name__)
+                error_msg = str(e)
+                if "SpreadsheetNotFound" in error_type:
                     report_lines.append(f"❌ <b>{table_name}</b>: не знайдено (перевірте назву або доступи)")
                 else:
-                    report_lines.append(f"⚠️ <b>{table_name}</b>: помилка")
+                    # Виводимо точну помилку для діагностики
+                    report_lines.append(f"⚠️ <b>{table_name}</b>: помилка [{error_type}] {error_msg[:100]}")
                     
         try:
             with open(UIDS_FILE, "w", encoding="utf-8") as f:
