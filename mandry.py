@@ -2316,36 +2316,41 @@ async def cmd_admin(message: types.Message, state: FSMContext):
 
 @dp.message(Command("sync_uids"), IsAdmin())
 async def cmd_sync_uids(message: types.Message):
-    await message.answer("🔄 Починаю сканування Google Таблиці. Переношу старих клієнтів у локальну базу...\nЦе може зайняти близько хвилини.")
+    await message.answer("🔄 Починаю сканування Google Таблиць...\nЦе може зайняти хвилину.")
     
     def _extract_all_uids():
         uids = load_uids()
         initial_count = len(uids)
+        
+        # Скануємо обидві таблиці, щоб точно нікого не загубити
+        tables_to_scan = {SHEET_NAME, BROADCAST_SHEET_NAME}
+        
+        for table_name in tables_to_scan:
+            try:
+                sh_to_scan = gc.open(table_name) 
+                for ws in sh_to_scan.worksheets():
+                    for row in ws.get_all_values():
+                        for cell in row:
+                            if isinstance(cell, str):
+                                # Регулярний вираз: шукає "UID:" (в будь-якому регістрі), 
+                                # ігнорує пробіли після двокрапки і забирає всі цифри
+                                matches = re.findall(r'(?i)UID:\s*(\d+)', cell)
+                                for match in matches:
+                                    uids.add(int(match))
+            except Exception as e:
+                print(f"[WARNING] Не вдалося просканувати таблицю {table_name}: {e}")
+                
         try:
-            # Скануємо основну таблицю
-            sh_to_scan = gc.open(BROADCAST_SHEET_NAME) 
-            for ws in sh_to_scan.worksheets():
-                for row in ws.get_all_values():
-                    for cell in row:
-                        if isinstance(cell, str) and "UID:" in cell.upper():
-                            for line in cell.split("\n"):
-                                clean_line = line.strip()
-                                if clean_line.upper().startswith("UID:"):
-                                    uid_part = clean_line[4:].strip()
-                                    if uid_part.isdigit():
-                                        uids.add(int(uid_part))
-            
             # Зберігаємо об'єднаний список
             with open(UIDS_FILE, "w", encoding="utf-8") as f:
                 json.dump(list(uids), f)
         except Exception as e:
-            print(f"[ERROR] Помилка синхронізації: {e}")
+            print(f"[ERROR] Помилка збереження {UIDS_FILE}: {e}")
             
         return len(uids) - initial_count, len(uids)
 
     added, total = await asyncio.to_thread(_extract_all_uids)
     await message.answer(f"✅ Синхронізація завершена!\nЗнайдено та перенесено нових UID: {added}\nВсього в базі для розсилки тепер: {total} користувачів.")
-
 @dp.callback_query(F.data == "admin_close_day", IsAdmin())
 async def admin_close_day(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("Введіть дату для ЗАКРИТТЯ у форматі ДД.ММ (наприклад, 15.08):")
