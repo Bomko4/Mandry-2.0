@@ -2323,7 +2323,7 @@ async def cmd_sync_uids(message: types.Message):
         initial_count = len(uids)
         try:
             # Скануємо основну таблицю
-            sh_to_scan = gc.open(SHEET_NAME) 
+            sh_to_scan = gc.open(BROADCAST_SHEET_NAME) 
             for ws in sh_to_scan.worksheets():
                 for row in ws.get_all_values():
                     for cell in row:
