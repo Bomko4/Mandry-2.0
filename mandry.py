@@ -2316,41 +2316,54 @@ async def cmd_admin(message: types.Message, state: FSMContext):
 
 @dp.message(Command("sync_uids"), IsAdmin())
 async def cmd_sync_uids(message: types.Message):
-    await message.answer("🔄 Починаю сканування Google Таблиць...\nЦе може зайняти хвилину.")
+    # Множина всіх можливих назв ваших таблиць. 
+    # Бот спробує відкрити їх усі. Якщо якоїсь немає - він просто піде далі.
+    tables_to_scan = {SHEET_NAME, BROADCAST_SHEET_NAME, "Архів Бронювань Мандри", "Мандри бронь"}
+    
+    await message.answer(f"🔄 Починаю сканування таблиць:\n{', '.join(tables_to_scan)}\n\nЦе може зайняти хвилину...")
     
     def _extract_all_uids():
         uids = load_uids()
         initial_count = len(uids)
-        
-        # Скануємо обидві таблиці, щоб точно нікого не загубити
-        tables_to_scan = {SHEET_NAME, BROADCAST_SHEET_NAME}
+        report_lines = []
         
         for table_name in tables_to_scan:
+            if not table_name:
+                continue
             try:
                 sh_to_scan = gc.open(table_name) 
                 for ws in sh_to_scan.worksheets():
                     for row in ws.get_all_values():
                         for cell in row:
                             if isinstance(cell, str):
-                                # Регулярний вираз: шукає "UID:" (в будь-якому регістрі), 
-                                # ігнорує пробіли після двокрапки і забирає всі цифри
-                                matches = re.findall(r'(?i)UID:\s*(\d+)', cell)
+                                # Регулярний вираз витягує всі цифри після UID: (ігноруючи пробіли)
+                                matches = re.findall(r'(?i)UID:\s*(-?\d+)', cell)
                                 for match in matches:
                                     uids.add(int(match))
+                report_lines.append(f"✅ <b>{table_name}</b>: успішно проскановано")
             except Exception as e:
-                print(f"[WARNING] Не вдалося просканувати таблицю {table_name}: {e}")
-                
+                if "SpreadsheetNotFound" in str(type(e)):
+                    report_lines.append(f"❌ <b>{table_name}</b>: не знайдено (перевірте назву або доступи)")
+                else:
+                    report_lines.append(f"⚠️ <b>{table_name}</b>: помилка")
+                    
         try:
-            # Зберігаємо об'єднаний список
             with open(UIDS_FILE, "w", encoding="utf-8") as f:
                 json.dump(list(uids), f)
         except Exception as e:
-            print(f"[ERROR] Помилка збереження {UIDS_FILE}: {e}")
+            report_lines.append(f"❌ Помилка запису файлу: {e}")
             
-        return len(uids) - initial_count, len(uids)
+        return len(uids) - initial_count, len(uids), "\n".join(report_lines)
 
-    added, total = await asyncio.to_thread(_extract_all_uids)
-    await message.answer(f"✅ Синхронізація завершена!\nЗнайдено та перенесено нових UID: {added}\nВсього в базі для розсилки тепер: {total} користувачів.")
+    added, total, detailed_report = await asyncio.to_thread(_extract_all_uids)
+    
+    await message.answer(
+        f"<b>Детальний звіт сканування:</b>\n{detailed_report}\n\n"
+        f"➕ Знайдено та перенесено нових UID: <b>{added}</b>\n"
+        f"📊 Всього в базі для розсилки тепер: <b>{total}</b> користувачів.",
+        parse_mode="HTML"
+    )
+
 @dp.callback_query(F.data == "admin_close_day", IsAdmin())
 async def admin_close_day(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("Введіть дату для ЗАКРИТТЯ у форматі ДД.ММ (наприклад, 15.08):")
