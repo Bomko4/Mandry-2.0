@@ -10,6 +10,9 @@ from aiohttp import web
 from dotenv import load_dotenv
 from google.auth.exceptions import RefreshError
 from zoneinfo import ZoneInfo
+import csv
+import io
+from aiogram.types import BufferedInputFile
 
 socket.setdefaulttimeout(10)
 from datetime import datetime, timedelta
@@ -2369,6 +2372,92 @@ async def cmd_sync_uids(message: types.Message):
         f"📊 Всього в базі для розсилки тепер: <b>{total}</b> користувачів.",
         parse_mode="HTML"
     )
+
+@dp.message(Command("stats"), IsAdmin())
+async def cmd_export_stats(message: types.Message):
+    await message.answer("🔄 Починаю сканування таблиці 'Архів Бронювань Мандри'. Це може зайняти кілька хвилин...")
+
+    def _generate_csv():
+        stats = {}  # Зберігатимемо: phone -> {'names': set(), 'booking_ids': set(), 'total_equipment': int}
+        
+        try:
+            # Відкриваємо архівну таблицю
+            sh = gc.open("Архів Бронювань Мандри")
+            
+            for ws in sh.worksheets():
+                time.sleep(1.5)  # Пауза для захисту від лімітів Google
+                values = ws.get_all_values()
+                
+                sheet_bookings = {}
+                booking_info = {}
+                
+                for r_idx, row in enumerate(values):
+                    for c_idx, cell in enumerate(row):
+                        if isinstance(cell, str) and "ID:" in cell:
+                            lines = [line.strip() for line in cell.split("\n") if line.strip()]
+                            b_id = lines[0].replace("ID:", "").strip()
+                            name = lines[1] if len(lines) > 1 else "Невідомо"
+                            
+                            # Шукаємо номер телефону (пропускаємо UID)
+                            phone = ""
+                            for line in lines[1:]:
+                                if not line.startswith("UID:") and normalize_phone_number(line):
+                                    phone = normalize_phone_number(line)
+                                    break
+                                    
+                            if not phone:
+                                continue
+                                
+                            if b_id not in sheet_bookings:
+                                sheet_bookings[b_id] = set()
+                                booking_info[b_id] = {'phone': phone, 'name': name}
+                                
+                            # Додаємо колонку, в якій знайдено цей ID
+                            sheet_bookings[b_id].add(c_idx)
+                            
+                # Агрегуємо дані з цього аркуша в загальну статистику
+                for b_id, cols in sheet_bookings.items():
+                    phone = booking_info[b_id]['phone']
+                    name = booking_info[b_id]['name']
+                    qty = len(cols)  # Кількість унікальних колонок = кількість сапів
+                    
+                    if phone not in stats:
+                        stats[phone] = {'names': set(), 'booking_ids': set(), 'total_equipment': 0}
+                        
+                    stats[phone]['names'].add(name)
+                    if b_id not in stats[phone]['booking_ids']:
+                        stats[phone]['booking_ids'].add(b_id)
+                        stats[phone]['total_equipment'] += qty
+
+            # Формуємо CSV файл у пам'яті
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(['Телефон', 'Ім\'я / Імена', 'Кількість бронювань', 'Загальна кількість спорядження'])
+            
+            # Сортуємо: спочатку ті, хто бронював найбільше разів
+            sorted_stats = sorted(stats.items(), key=lambda x: len(x[1]['booking_ids']), reverse=True)
+            
+            for phone, data in sorted_stats:
+                names_str = " / ".join(data['names'])
+                bookings_count = len(data['booking_ids'])
+                total_qty = data['total_equipment']
+                # Додаємо знак '+', щоб таблиці розпізнавали це як телефон
+                writer.writerow([f"+{phone}", names_str, bookings_count, total_qty])
+                
+            return output.getvalue()
+        except Exception as e:
+            return f"ERROR:{e}"
+
+    # Запускаємо збір в окремому потоці, щоб бот не зависав для інших користувачів
+    csv_data = await asyncio.to_thread(_generate_csv)
+    
+    if csv_data.startswith("ERROR:"):
+        await message.answer(f"❌ Сталася помилка при зборі даних:\n{csv_data}")
+        return
+
+    # Відправляємо файл у Telegram (utf-8-sig для правильного відображення кирилиці в Excel)
+    file = BufferedInputFile(csv_data.encode('utf-8-sig'), filename=f"Статистика_клієнтів_{datetime.now().strftime('%d_%m')}.csv")
+    await bot.send_document(chat_id=message.chat.id, document=file, caption="✅ Статистику зібрано! Відкрийте файл в Excel або Google Таблицях.")
 
 @dp.callback_query(F.data == "admin_close_day", IsAdmin())
 async def admin_close_day(callback: types.CallbackQuery, state: FSMContext):
